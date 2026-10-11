@@ -40,6 +40,24 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Opens the collapsible FAQ section, which is collapsed by default, so the
+  /// entries inside it are built and findable.
+  ///
+  /// This has to come first: an ExpansionTile does not build its children until
+  /// expanded, so a bare `find.text(question)` on a collapsed section returns
+  /// nothing at all -- not even a lazily-reachable row to scroll to.
+  Future<void> openFaqSection(WidgetTester tester) async {
+    final section = find.text('FAQ');
+    await tester.scrollUntilVisible(
+      section,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(section);
+    await tester.pumpAndSettle();
+  }
+
   /// Scrolls the FAQ question into view, then taps it to expand.
   ///
   /// The settings list is a lazy ListView, so a long list (Android hides
@@ -69,6 +87,7 @@ void main() {
       await tester.pumpWidget(wrap());
       await tester.pumpAndSettle();
 
+      await openFaqSection(tester);
       await expandFaq(tester, 'Do I need TMDB, or can I use TheTVDB only?');
 
       // The answer must actually surface, not just the header.
@@ -121,6 +140,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     await tester.pumpWidget(wrap());
     await tester.pumpAndSettle();
+    await openFaqSection(tester);
     await reveal(tester, 'Which playback engine should I use?');
     expect(find.text('Which playback engine should I use?'), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
@@ -131,6 +151,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     await tester.pumpWidget(wrap());
     await tester.pumpAndSettle();
+    await openFaqSection(tester);
     expect(find.text('Which playback engine should I use?'), findsNothing);
     // The shared FAQ entries must still be there.
     expect(find.text('Do I need TMDB, or can I use TheTVDB only?'),

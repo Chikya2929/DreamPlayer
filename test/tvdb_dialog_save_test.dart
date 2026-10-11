@@ -52,6 +52,27 @@ void main() {
     );
   }
 
+  /// Scrolls a row into view and taps it.
+  ///
+  /// `ensureVisible` alone is not enough here: the settings list is a lazy
+  /// ListView that keeps growing (the collapsible FAQ section was added at the
+  /// bottom), so a row can sit just past the built viewport where the finder
+  /// still resolves but the derived tap offset misses and the tap lands on
+  /// nothing. Scroll first, then ensure, then tap.
+  Future<void> openRow(WidgetTester tester, Finder f) async {
+    if (f.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(
+        f,
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+    }
+    await tester.ensureVisible(f);
+    await tester.pumpAndSettle();
+    await tester.tap(f);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('saving a TheTVDB key does not trip the dependents assertion',
       (tester) async {
     await tester.pumpWidget(wrap(const SettingsScreen()));
@@ -62,15 +83,11 @@ void main() {
       AppLocalizations.of(tester.element(find.byType(SettingsScreen)))
           .settingsMetadata,
     );
-    await tester.ensureVisible(metadata);
-    await tester.tap(metadata);
-    await tester.pumpAndSettle();
+      await openRow(tester, metadata);
 
     final tvdbTile = find.text('TheTVDB metadata');
     expect(tvdbTile, findsOneWidget);
-    await tester.ensureVisible(tvdbTile.first);
-    await tester.tap(tvdbTile);
-    await tester.pumpAndSettle();
+      await openRow(tester, tvdbTile.first);
 
     // Paste a key and save.
     final fields = find.byType(TextField);
@@ -99,18 +116,14 @@ void main() {
       AppLocalizations.of(tester.element(find.byType(SettingsScreen)))
           .settingsMetadata,
     );
-    await tester.ensureVisible(metadata);
-    await tester.tap(metadata);
-    await tester.pumpAndSettle();
+      await openRow(tester, metadata);
 
     final tmdbTile = find.text(
       AppLocalizations.of(tester.element(find.byType(SettingsScreen)))
           .settingsTmdbApiKey,
     );
     expect(tmdbTile, findsOneWidget);
-    await tester.ensureVisible(tmdbTile);
-    await tester.tap(tmdbTile);
-    await tester.pumpAndSettle();
+      await openRow(tester, tmdbTile);
 
     // 32-character key so the length validation passes and Save really pops.
     final fields = find.byType(TextField);

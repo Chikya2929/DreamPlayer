@@ -723,7 +723,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return SafeArea(
       child: TvOverscan(
-        child: ListView(
+        child: Theme(
+          // Material 3 ExpansionTile paints a bright rule at the section
+          // boundary when expanded, which read as a stray highlight. The
+          // headers and spacing already delimit sections, so dividers are
+          // off for the whole list; the ones we do want are explicit
+          // Divider()s, which carry their own colour.
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+          ),
+          child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
             // Premium section — shown when paywall is effective (iOS builds
@@ -775,7 +784,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 },
               ),
-              const Divider(),
+              Divider(color: Theme.of(context).dividerColor),
             ],
             // Support (donations) is Android-only: it unlocks nothing (fine
             // under Guideline 3.1.1) but the Razorpay/GitHub-Sponsors links
@@ -811,7 +820,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     }
                   },
                 ),
-              const Divider(),
+              Divider(color: Theme.of(context).dividerColor),
             ],
             // === General ===
             ExpansionTile(
@@ -948,7 +957,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
             const _LayoutSection(),
-            const Divider(),
             // === Player ===
             if (!isTv)
               ExpansionTile(
@@ -1674,70 +1682,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
+            Divider(color: Theme.of(context).dividerColor),
             // === FAQ ===
-            if (defaultTargetPlatform == TargetPlatform.android)
-              _FaqTile(
-                icon: Icons.play_circle_outline,
-                question: 'Which playback engine should I use?',
-                answer: 'DreamPlayer offers two engines on Android:\n\n'
-                    '• Media3 (default) — hardware-accelerated, supports '
-                    'Dolby Vision, HDR10, HDR10+, and all audio codecs via '
-                    'FFmpeg. Best for most users.\n\n'
-                    '• libmpv — software fallback using FFmpeg. Slower but '
-                    'handles some edge-case formats Media3 cannot decode. '
-                    'Does not support Dolby Vision or HDR passthrough.\n\n'
-                    'Use Media3 unless a specific file fails to play, in '
-                    'which case try libmpv from the error screen.',
+            // Collapsed by default: five long answers sat below every other
+            // section and pushed the footer off the bottom of the screen.
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                leading: const Icon(Icons.help_outline),
+                title: const Text('FAQ'),
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                children: [
+                if (defaultTargetPlatform == TargetPlatform.android)
+                  _FaqTile(
+                    icon: Icons.play_circle_outline,
+                    question: 'Which playback engine should I use?',
+                    answer: 'DreamPlayer offers two engines on Android:\n\n'
+                        '• Media3 (default) — hardware-accelerated, supports '
+                        'Dolby Vision, HDR10, HDR10+, and all audio codecs via '
+                        'FFmpeg. Best for most users.\n\n'
+                        '• libmpv — software fallback using FFmpeg. Slower but '
+                        'handles some edge-case formats Media3 cannot decode. '
+                        'Does not support Dolby Vision or HDR passthrough.\n\n'
+                        'Use Media3 unless a specific file fails to play, in '
+                        'which case try libmpv from the error screen.',
+                  ),
+                _FaqTile(
+                  icon: Icons.refresh,
+                  question: 'How do I refresh network share listings?',
+                  answer: 'Pull down on any folder listing in SMB, WebDAV, FTP, '
+                      'DLNA, or Jellyfin to refresh. This is useful when you '
+                      'add, rename, or delete files on your NAS or PC and want '
+                      'to see the changes without navigating back to the server list.',
+                ),
+                _FaqTile(
+                  icon: Icons.movie_filter,
+                  question: 'How should I name my files for TMDB metadata?',
+                  answer: 'DreamPlayer tries to match filenames against The Movie '
+                          'Database (TMDB) to fetch posters, titles, ratings, and '
+                          'other metadata.\n\n'
+                          'Best results come from clean names:\n'
+                          '  Dune (2021)\n'
+                          '  The Matrix 1999\n'
+                          '  Breaking Bad S01E01\n\n'
+                          'These are automatically cleaned up (quality tags like '
+                          '1080p, WEB-DL, and release group tags like -RARBG are '
+                          'stripped before searching).\n\n'
+                          'You can also manually fix a match: open the file\'s '
+                          'details screen, tap "Fix match", and search for the '
+                          'right title yourself. That search covers every '
+                          'metadata provider you have configured, so it will find '
+                          'the title even if it is not on TMDB.',
+                ),
+                _FaqTile(
+                  icon: Icons.travel_explore,
+                  question: 'Do I need TMDB, or can I use TheTVDB only?',
+                  answer: 'Either one works on its own — you can use TMDB only, '
+                      'TheTVDB only, or both.\n\n'
+                      'TMDB stays the primary provider because it covers movies '
+                      'and series most completely. TheTVDB is optional and kicks '
+                      'in when TMDB has no confident match for a file, which is '
+                      'common for some anime and older or more obscure series. '
+                      'If you only add a TheTVDB key and leave TMDB unset, it '
+                      'simply becomes your provider and everything still works.\n\n'
+                      'To set one up, go to Settings → Metadata. Get a free TMDB '
+                      'key at themoviedb.org → Settings → API → Create, and a '
+                      'TheTVDB v4 key at thetvdb.com/api. TheTVDB also asks for a '
+                      'Subscriber PIN on some accounts — leave it blank if yours '
+                      'does not need one.\n\n'
+                      'Keys are stored in the platform secure store (Android '
+                      'Keystore / iOS Keychain), never in plain text.\n\n'
+                      'You do not need to pick a provider anywhere else: "Get '
+                      'info" and "Fix match" search everything you have '
+                      'configured and show one combined result list, so a title '
+                      'that is only on TheTVDB will still turn up.',
+                ),
+                ],
               ),
-            _FaqTile(
-              icon: Icons.refresh,
-              question: 'How do I refresh network share listings?',
-              answer: 'Pull down on any folder listing in SMB, WebDAV, FTP, '
-                  'DLNA, or Jellyfin to refresh. This is useful when you '
-                  'add, rename, or delete files on your NAS or PC and want '
-                  'to see the changes without navigating back to the server list.',
-            ),
-            _FaqTile(
-              icon: Icons.movie_filter,
-              question: 'How should I name my files for TMDB metadata?',
-              answer: 'DreamPlayer tries to match filenames against The Movie '
-                      'Database (TMDB) to fetch posters, titles, ratings, and '
-                      'other metadata.\n\n'
-                      'Best results come from clean names:\n'
-                      '  Dune (2021)\n'
-                      '  The Matrix 1999\n'
-                      '  Breaking Bad S01E01\n\n'
-                      'These are automatically cleaned up (quality tags like '
-                      '1080p, WEB-DL, and release group tags like -RARBG are '
-                      'stripped before searching).\n\n'
-                      'You can also manually fix a match: open the file\'s '
-                      'details screen, tap "Fix match", and search for the '
-                      'right title yourself. That search covers every '
-                      'metadata provider you have configured, so it will find '
-                      'the title even if it is not on TMDB.',
-            ),
-            _FaqTile(
-              icon: Icons.travel_explore,
-              question: 'Do I need TMDB, or can I use TheTVDB only?',
-              answer: 'Either one works on its own — you can use TMDB only, '
-                  'TheTVDB only, or both.\n\n'
-                  'TMDB stays the primary provider because it covers movies '
-                  'and series most completely. TheTVDB is optional and kicks '
-                  'in when TMDB has no confident match for a file, which is '
-                  'common for some anime and older or more obscure series. '
-                  'If you only add a TheTVDB key and leave TMDB unset, it '
-                  'simply becomes your provider and everything still works.\n\n'
-                  'To set one up, go to Settings → Metadata. Get a free TMDB '
-                  'key at themoviedb.org → Settings → API → Create, and a '
-                  'TheTVDB v4 key at thetvdb.com/api. TheTVDB also asks for a '
-                  'Subscriber PIN on some accounts — leave it blank if yours '
-                  'does not need one.\n\n'
-                  'Keys are stored in the platform secure store (Android '
-                  'Keystore / iOS Keychain), never in plain text.\n\n'
-                  'You do not need to pick a provider anywhere else: "Get '
-                  'info" and "Fix match" search everything you have '
-                  'configured and show one combined result list, so a title '
-                  'that is only on TheTVDB will still turn up.',
             ),
             // Restore Purchases — always visible when paywall is effective.
             // Opens the paywall sheet so the user can see which product is
@@ -1749,7 +1770,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: const Text('Open paywall to restore or view your subscription'),
                 onTap: () => showPaywall(context),
               ),
-              const Divider(),
+              Divider(color: Theme.of(context).dividerColor),
             ],
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -1772,7 +1793,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ],
-        ),
+          ),
+          ),
       ),
     );
   }
