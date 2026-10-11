@@ -445,21 +445,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsMpvNormalizeDownmixDesc =>
-      'Scales 5.1/7.1 audio down when MPV mixes it to stereo, avoiding distortion but playing quieter than the Media3 engine';
+      'Avoid distortion when MPV mixes to stereo';
 
   @override
   String get settingsSwipeGestures => 'Swipe gestures';
 
   @override
-  String get settingsSwipeDesc =>
-      'Swipe left side for brightness, right side for volume';
+  String get settingsSwipeDesc => 'Left side: brightness · Right: volume';
 
   @override
   String get settingsPip => 'Picture-in-picture';
 
   @override
-  String get settingsPipDesc =>
-      'Keep playing in a floating window when you leave the app';
+  String get settingsPipDesc => 'Keep playing in a floating window';
 
   @override
   String get settingsDefaultEngine => 'Default playback engine';
@@ -500,7 +498,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsOnScreenBadges => 'On-screen badges';
 
   @override
-  String get settingsBadgesDesc => 'Show format chips on screen while playing';
+  String get settingsBadgesDesc => 'Format chips while playing';
 
   @override
   String get settingsBadgeOptions => 'Badge options';
@@ -545,8 +543,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsNightMode => 'Night Mode';
 
   @override
-  String get settingsNightModeDesc =>
-      'Compress dynamic range for quiet listening';
+  String get settingsNightModeDesc => 'Compresses quiet audio';
 
   @override
   String get settingsVideoDecoder => 'Video decoder';
@@ -1532,18 +1529,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsOpensubtitles => 'OpenSubtitles';
 
   @override
-  String get settingsAutoDownloadSubs =>
-      'Download best match when no subtitles found';
+  String get settingsAutoDownloadSubs => 'Download a match if none found';
 
   @override
   String get settingsSimklSignOut => 'Sign out and stop syncing';
 
   @override
-  String get settingsSimklSyncDesc =>
-      'Sync watched history with simkl.com (free unlimited)';
+  String get settingsSimklSyncDesc => 'Sync watched history';
 
   @override
-  String get settingsGnuGpl => 'GNU GPL v3.0 and third-party notices';
+  String get settingsGnuGpl => 'GPL v3.0 and third-party notices';
 
   @override
   String settingsSyncedCount(int count) {

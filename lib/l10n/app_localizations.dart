@@ -951,7 +951,7 @@ abstract class AppLocalizations {
   /// MPV downmix normalization subtitle
   ///
   /// In en, this message translates to:
-  /// **'Scales 5.1/7.1 audio down when MPV mixes it to stereo, avoiding distortion but playing quieter than the Media3 engine'**
+  /// **'Avoid distortion when MPV mixes to stereo'**
   String get settingsMpvNormalizeDownmixDesc;
 
   /// Toggle for swipe brightness/volume
@@ -963,7 +963,7 @@ abstract class AppLocalizations {
   /// Swipe gestures subtitle
   ///
   /// In en, this message translates to:
-  /// **'Swipe left side for brightness, right side for volume'**
+  /// **'Left side: brightness · Right: volume'**
   String get settingsSwipeDesc;
 
   /// PiP toggle label
@@ -975,7 +975,7 @@ abstract class AppLocalizations {
   /// PiP subtitle
   ///
   /// In en, this message translates to:
-  /// **'Keep playing in a floating window when you leave the app'**
+  /// **'Keep playing in a floating window'**
   String get settingsPipDesc;
 
   /// Default playback engine setting
@@ -1047,7 +1047,7 @@ abstract class AppLocalizations {
   /// Badges subtitle
   ///
   /// In en, this message translates to:
-  /// **'Show format chips on screen while playing'**
+  /// **'Format chips while playing'**
   String get settingsBadgesDesc;
 
   /// Badge options title
@@ -1137,7 +1137,7 @@ abstract class AppLocalizations {
   /// Night mode subtitle
   ///
   /// In en, this message translates to:
-  /// **'Compress dynamic range for quiet listening'**
+  /// **'Compresses quiet audio'**
   String get settingsNightModeDesc;
 
   /// Decoder picker label
@@ -3009,7 +3009,7 @@ abstract class AppLocalizations {
   /// Auto download subtitles description
   ///
   /// In en, this message translates to:
-  /// **'Download best match when no subtitles found'**
+  /// **'Download a match if none found'**
   String get settingsAutoDownloadSubs;
 
   /// SIMKL sign out description
@@ -3021,13 +3021,13 @@ abstract class AppLocalizations {
   /// SIMKL sync description
   ///
   /// In en, this message translates to:
-  /// **'Sync watched history with simkl.com (free unlimited)'**
+  /// **'Sync watched history'**
   String get settingsSimklSyncDesc;
 
   /// GNU GPL license notice
   ///
   /// In en, this message translates to:
-  /// **'GNU GPL v3.0 and third-party notices'**
+  /// **'GPL v3.0 and third-party notices'**
   String get settingsGnuGpl;
 
   /// SIMKL sync count snackbar

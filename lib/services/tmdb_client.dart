@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/tmdb_api_key.dart';
 import '../models/video_item.dart';
+import 'adult_content_store.dart';
 import 'artwork_override.dart';
 import 'image_cache_service.dart';
 import 'the_tvdb_client.dart';
@@ -34,14 +35,25 @@ List<String> _stringList(dynamic value) {
 /// What kind of title a matched file represents.
 enum TmdKind { movie, tv }
 
-enum MetadataProvider { tmdb, theTvdb }
+enum MetadataProvider { tmdb, theTvdb, external }
 
 extension MetadataProviderDetails on MetadataProvider {
   String get label => switch (this) {
     MetadataProvider.tmdb => 'TMDB',
     MetadataProvider.theTvdb => 'TheTVDB',
+    MetadataProvider.external => 'External',
   };
 }
+
+/// Parses a persisted [MetadataProvider] name.
+///
+/// Anything unrecognised falls back to [MetadataProvider.tmdb] so a cache
+/// written by a newer build (or corrupted) cannot crash deserialization.
+MetadataProvider metadataProviderFromName(String? name) => switch (name) {
+      'theTvdb' => MetadataProvider.theTvdb,
+      'external' => MetadataProvider.external,
+      _ => MetadataProvider.tmdb,
+    };
 
 /// A TMDB search hit (movie or series).
 class TmdMovie {
@@ -136,9 +148,7 @@ class TmdMovie {
       overview: json['overview'] as String? ?? '',
       voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0,
       kind: kind,
-      provider: json['provider'] == 'theTvdb'
-          ? MetadataProvider.theTvdb
-          : MetadataProvider.tmdb,
+      provider: metadataProviderFromName(json['provider'] as String?),
       originalTitle: json[kind == TmdKind.movie ? 'original_title' : 'original_name'] as String?,
       alternateTitles: _stringList(json['alternateTitles']),
     );
@@ -167,9 +177,7 @@ class TmdMovie {
         overview: json['overview'] as String? ?? '',
         voteAverage: (json['voteAverage'] as num?)?.toDouble() ?? 0,
         kind: json['kind'] == 'tv' ? TmdKind.tv : TmdKind.movie,
-    provider: json['provider'] == 'theTvdb'
-        ? MetadataProvider.theTvdb
-        : MetadataProvider.tmdb,
+    provider: metadataProviderFromName(json['provider'] as String?),
         originalTitle: json['originalTitle'] as String?,
     alternateTitles: _stringList(json['alternateTitles']),
       );
@@ -1669,12 +1677,32 @@ final yearMatch = _yearPattern.firstMatch(name);
 }
 
 /// Talks to The Movie Database (TMDB) v3 API over `dart:io` HttpClient.
+/// HTTP seam for [TmdApi], mirroring `TheTvdbTransport`.
+///
+/// Exists so the QUERY STRING can be asserted in tests: `include_adult` is the
+/// whole adult-content switch (issue #46), and before this the only way to
+/// verify it was to hit the live API and count adult results. Injecting a
+/// transport records the URL and returns a canned body instead.
+typedef TmdTransport = Future<TmdTransportResponse> Function(Uri uri);
+
+class TmdTransportResponse {
+  const TmdTransportResponse({required this.statusCode, required this.body});
+
+  final int statusCode;
+  final String body;
+}
+
 class TmdApi {
-  TmdApi({this.apiKey});
+  TmdApi({this.apiKey, this.transport});
+
+  /// Test seam; see [TmdTransport].
+  final TmdTransport? transport;
+
 
   /// Explicit override; when set, [effectiveApiKey] uses it instead of the
   /// compile-time default (empty string = force no default, for tests).
   final String? apiKey;
+
   static const String _baseUrl = 'https://api.themoviedb.org/3';
 
   static const String prefsKey = 'dreamplayer.tmdbApiKey';
@@ -1723,7 +1751,9 @@ class TmdApi {
 
   Future<List<TmdMovie>> search(
     String query, {
-    int? year, TmdKind kind = TmdKind.movie,
+    int? year,
+    TmdKind kind = TmdKind.movie,
+    bool? includeAdult,
   }) async {
     final key = await effectiveApiKey();
     if (key.isEmpty) return const [];
@@ -1733,7 +1763,13 @@ class TmdApi {
       'api_key': key,
       'query': searchQuery,
       'language': 'en-US',
-      'include_adult': 'false',
+      // The ONLY place adult content is gated (issue #46). Nothing else in the
+      // app filters adult results, so this parameter is the whole switch: with
+      // it false TMDB never returns an adult title and the file resolves to no
+      // match at all. Falls back to the persisted setting; an explicit
+      // argument wins so callers and tests need no global state.
+      'include_adult':
+          ((includeAdult ?? await AdultContentStore().load()) ? 'true' : 'false'),
       if (year != null) (kind == TmdKind.movie ? 'year' : 'first_air_date_year'): '$year',
     };
     final json = await _get('$endpoint?${_query(params)}');
@@ -2274,6 +2310,18 @@ class TmdApi {
 
   Future<Map<String, dynamic>> _get(String pathAndQuery) async {
     final uri = Uri.parse('$_baseUrl$pathAndQuery');
+    final transport = this.transport;
+    if (transport != null) {
+      final response = await transport(uri);
+      if (response.statusCode != 200) {
+        throw TmdException(_friendlyStatus(response.statusCode));
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw const TmdException('Unexpected TMDB response.');
+      }
+      return decoded;
+    }
     // Retry once for transient failures (flaky network, dropped keep-alive
     // socket, per-second rate-limit burst). Hard errors (bad key, bad payload)
     // fail immediately with their specific message.

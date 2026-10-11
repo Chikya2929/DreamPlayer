@@ -579,7 +579,7 @@
   "@settingsMpvNormalizeDownmix": {
     "description": "Toggle for mpv surround-to-stereo downmix normalization"
   },
-  "settingsMpvNormalizeDownmixDesc": "Scales 5.1/7.1 audio down when MPV mixes it to stereo, avoiding distortion but playing quieter than the Media3 engine",
+  "settingsMpvNormalizeDownmixDesc": "Avoid distortion when MPV mixes to stereo",
   "@settingsMpvNormalizeDownmixDesc": {
     "description": "MPV downmix normalization subtitle"
   },
@@ -587,7 +587,7 @@
   "@settingsSwipeGestures": {
     "description": "Toggle for swipe brightness/volume"
   },
-  "settingsSwipeDesc": "Swipe left side for brightness, right side for volume",
+  "settingsSwipeDesc": "Left side: brightness · Right: volume",
   "@settingsSwipeDesc": {
     "description": "Swipe gestures subtitle"
   },
@@ -595,13 +595,13 @@
   "@settingsPip": {
     "description": "PiP toggle label"
   },
-  "settingsPipDesc": "Keep playing in a floating window when you leave the app",
+  "settingsPipDesc": "Keep playing in a floating window",
   "@settingsPipDesc": {
     "description": "PiP subtitle"
   },
   "settingsDefaultEngine": "Default playback engine",
   "@settingsDefaultEngine": {
-    "description": "Engine picker label"
+    "description": "Default playback engine setting"
   },
   "settingsEngineAutoDesc": "Start with Media3, auto-fallback to libmpv if it fails",
   "@settingsEngineAutoDesc": {
@@ -637,19 +637,19 @@
   },
   "settingsAutoPlayNextDesc": "Play the next episode when one ends",
   "@settingsAutoPlayNextDesc": {
-    "description": "Auto-play subtitle"
+    "description": "Auto play next description"
   },
   "settingsOnScreenBadges": "On-screen badges",
   "@settingsOnScreenBadges": {
     "description": "Badge toggle label"
   },
-  "settingsBadgesDesc": "Show format chips on screen while playing",
+  "settingsBadgesDesc": "Format chips while playing",
   "@settingsBadgesDesc": {
     "description": "Badges subtitle"
   },
   "settingsBadgeOptions": "Badge options",
   "@settingsBadgeOptions": {
-    "description": "Badge selection dialog title"
+    "description": "Badge options title"
   },
   "settingsChooseBadges": "Choose which chips to show",
   "@settingsChooseBadges": {
@@ -703,7 +703,7 @@
   "@settingsNightMode": {
     "description": "Night mode section title"
   },
-  "settingsNightModeDesc": "Compress dynamic range for quiet listening",
+  "settingsNightModeDesc": "Compresses quiet audio",
   "@settingsNightModeDesc": {
     "description": "Night mode subtitle"
   },
@@ -749,7 +749,7 @@
   },
   "settingsCacheCleared": "Cache cleared",
   "@settingsCacheCleared": {
-    "description": "Success message after clearing cache"
+    "description": "Cache cleared snackbar"
   },
   "settingsCacheClearedDesc": "Cached images and temporary files cleared",
   "@settingsCacheClearedDesc": {
@@ -845,15 +845,15 @@
   },
   "settingsSubReadingLang": "Subtitle reading language",
   "@settingsSubReadingLang": {
-    "description": "OpenSubtitles reading language"
+    "description": "Subtitle reading language setting"
   },
   "settingsSubDownloadLang": "Subtitle download language",
   "@settingsSubDownloadLang": {
-    "description": "OpenSubtitles download language"
+    "description": "Subtitle download language setting"
   },
   "settingsSubEncoding": "Subtitle encoding",
   "@settingsSubEncoding": {
-    "description": "Subtitle file encoding"
+    "description": "Subtitle encoding setting"
   },
   "settingsAutoFetchSubs": "Auto-fetch subtitles",
   "@settingsAutoFetchSubs": {
@@ -1637,7 +1637,7 @@
   },
   "opensubtitlesSignIn": "Sign in to OpenSubtitles",
   "@opensubtitlesSignIn": {
-    "description": "Login dialog title"
+    "description": "OpenSubtitles sign in title"
   },
   "opensubtitlesDownloadLang": "Download language",
   "@opensubtitlesDownloadLang": {
@@ -1987,25 +1987,9 @@
   "@settingsClearCacheConfirm": {
     "description": "Clear cache confirmation title"
   },
-  "settingsCacheCleared": "Cache cleared",
-  "@settingsCacheCleared": {
-    "description": "Cache cleared snackbar"
-  },
   "settingsCouldNotOpenLink": "Could not open this link",
   "@settingsCouldNotOpenLink": {
     "description": "Could not open link error"
-  },
-  "settingsDefaultEngine": "Default playback engine",
-  "@settingsDefaultEngine": {
-    "description": "Default playback engine setting"
-  },
-  "settingsAutoPlayNextDesc": "Play the next episode when one ends",
-  "@settingsAutoPlayNextDesc": {
-    "description": "Auto play next description"
-  },
-  "settingsBadgeOptions": "Badge options",
-  "@settingsBadgeOptions": {
-    "description": "Badge options title"
   },
   "settingsBadgeOptionsDesc": "Choose which chips to show",
   "@settingsBadgeOptionsDesc": {
@@ -2023,19 +2007,7 @@
   "@settingsOpensubtitles": {
     "description": "OpenSubtitles setting title"
   },
-  "settingsSubReadingLang": "Subtitle reading language",
-  "@settingsSubReadingLang": {
-    "description": "Subtitle reading language setting"
-  },
-  "settingsSubDownloadLang": "Subtitle download language",
-  "@settingsSubDownloadLang": {
-    "description": "Subtitle download language setting"
-  },
-  "settingsSubEncoding": "Subtitle encoding",
-  "@settingsSubEncoding": {
-    "description": "Subtitle encoding setting"
-  },
-  "settingsAutoDownloadSubs": "Download best match when no subtitles found",
+  "settingsAutoDownloadSubs": "Download a match if none found",
   "@settingsAutoDownloadSubs": {
     "description": "Auto download subtitles description"
   },
@@ -2043,11 +2015,11 @@
   "@settingsSimklSignOut": {
     "description": "SIMKL sign out description"
   },
-  "settingsSimklSyncDesc": "Sync watched history with simkl.com (free unlimited)",
+  "settingsSimklSyncDesc": "Sync watched history",
   "@settingsSimklSyncDesc": {
     "description": "SIMKL sync description"
   },
-  "settingsGnuGpl": "GNU GPL v3.0 and third-party notices",
+  "settingsGnuGpl": "GPL v3.0 and third-party notices",
   "@settingsGnuGpl": {
     "description": "GNU GPL license notice"
   },
@@ -2067,10 +2039,6 @@
   "settingsSimklPairing": "Go to the address below and enter this code:",
   "@settingsSimklPairing": {
     "description": "SIMKL pairing instructions"
-  },
-  "opensubtitlesSignIn": "Sign in to OpenSubtitles",
-  "@opensubtitlesSignIn": {
-    "description": "OpenSubtitles sign in title"
   },
   "opensubtitlesAnonymousHint": "Anonymous = 5/day, free account = 20/day",
   "@opensubtitlesAnonymousHint": {

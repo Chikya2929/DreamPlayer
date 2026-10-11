@@ -445,7 +445,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsMpvNormalizeDownmixDesc =>
-      'Scales 5.1/7.1 audio down when MPV mixes it to stereo, avoiding distortion but playing quieter than the Media3 engine';
+      'Avoid distortion when MPV mixes to stereo';
 
   @override
   String get settingsSwipeGestures => '滑动手势';

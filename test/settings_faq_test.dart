@@ -126,11 +126,18 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('TheTVDB metadata'), findsOneWidget);
+
+      // Issue #46: the long intro paragraph is gone. It had to go - it was
+      // three screens of prose in front of two buttons - but the guarantee it
+      // was making (TMDB is NOT mandatory) now has to come from somewhere, so
+      // assert it structurally: the adult toggle and both provider tiles are
+      // the whole section.
       expect(
         find.textContaining('You can use either one on its own'),
-        findsOneWidget,
-        reason: 'the intro should not imply TMDB is mandatory',
+        findsNothing,
+        reason: 'the verbose Metadata intro must stay removed',
       );
+      expect(find.text('Include adult content'), findsOneWidget);
 
       debugDefaultTargetPlatformOverride = null;
     });

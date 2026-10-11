@@ -9,6 +9,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/adult_content_store.dart';
 import '../services/auto_play_store.dart';
 import '../services/badge_prefs.dart';
 import '../services/cache_cleaner.dart';
@@ -20,6 +21,7 @@ import '../services/exo_player.dart';
 import '../services/image_cache_service.dart';
 import '../l10n/app_localizations.dart';
 import '../services/language_service.dart';
+import '../services/metadata_provider_adapter.dart';
 import '../services/opensubtitles_client.dart';
 import '../services/subtitle_encodings.dart';
 import '../services/subtitle_languages.dart';
@@ -91,6 +93,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _theTvdbFallback = true;
   MetadataProviderChoice _metadataProvider = MetadataProviderChoice.tmdb;
   String? _theTvdbStorageError;
+  bool _includeAdult = false;
+
+  /// Adapters registered by an external metadata provider (issue #46 part 2,
+  /// e.g. AVDb). Empty until one ships, in which case the "External" segment
+  /// is hidden rather than offering a choice that resolves nothing.
+  List<MetadataProviderAdapter> get _externalAdapters =>
+      MetadataProviderRegistry.instance.adapters;
+
+  bool get _externalSelected =>
+      _metadataProvider == MetadataProviderChoice.external;
+
+  /// TheTVDB's fallback switch only means something while a BUILT-IN provider
+  /// is primary. In external mode TheTVDB is not a fallback for TMDB, so the
+  /// switch is hidden rather than shown disabled - a disabled control reads as
+  /// broken, and this one is simply not applicable.
+  bool get _showTheTvdbFallbackSwitch =>
+      _metadataProvider == MetadataProviderChoice.tmdb || _externalSelected;
 
   @override
   void initState() {
@@ -381,12 +400,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await store.load();
       final fallback = await TheTvdbClient.isFallbackEnabled();
       _metadataProvider = await TheTvdbClient.providerChoice();
+      final includeAdult = await AdultContentStore().load();
       if (!mounted) return;
       setState(() {
         _theTvdbKey = store.apiKey ?? '';
         _theTvdbPin = store.pin ?? '';
         _theTvdbFallback = fallback;
         _theTvdbStorageError = null;
+        _includeAdult = includeAdult;
       });
     } catch (_) {
       if (!mounted) return;
@@ -541,6 +562,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _setTheTvdbFallback(bool enabled) async {
     await TheTvdbClient.setFallbackEnabled(enabled);
     if (mounted) setState(() => _theTvdbFallback = enabled);
+  }
+
+  /// One-line explanation of what the selected provider actually does.
+  String _providerHelpText() => switch (_metadataProvider) {
+        MetadataProviderChoice.tmdb =>
+          'TMDB resolves everything. TheTVDB is used only as a fallback, if '
+              'you enable it below.',
+        MetadataProviderChoice.theTvdb =>
+          'TheTVDB resolves everything. TMDB is not queried.',
+        MetadataProviderChoice.external =>
+          'The external provider resolves everything. TMDB is not queried '
+              'unless it is enabled as a fallback.',
+      };
+
+  /// Credential dialog for an external adapter (issue #46 part 2).
+  ///
+  /// Adapters that need no key of their own - or that ship without a Settings
+  /// entry - simply get a tile that opens this and saves through the adapter's
+  /// own store, so the seam does not hardcode one provider's credentials.
+  Future<void> _editExternalAdapter(MetadataProviderAdapter adapter) async {
+    final controller = TextEditingController(text: adapter.currentApiKey ?? '');
+    final key = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${adapter.label} API key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              adapter.credentialsHelp,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'API key'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (key == null || !mounted) return;
+    await adapter.saveApiKey(key);
+    if (mounted) setState(() {});
+  }
+
+  /// Adult metadata (issue #46 part 1). Cached metadata is cleared because a
+  /// title that previously resolved to nothing now has a match, and a title
+  /// that matched a non-adult result may now match something else entirely.
+  Future<void> _setIncludeAdult(bool value) async {
+    await AdultContentStore().setIncludeAdult(value);
+    await TmdService.instance.clearAllResolved();
+    if (!mounted) return;
+    setState(() => _includeAdult = value);
   }
 
   Future<void> _loadPassthrough() async {
@@ -840,7 +927,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile(
                   secondary: const Icon(Icons.unfold_more),
                   title: const Text('Auto-expand folders'),
-                  subtitle: const Text('Show each subfolder and video file as its own card on the home screen'),
+                  subtitle: const Text('Each subfolder gets its own card'),
                   value: _autoExpandFolders,
                   onChanged: (v) async {
                     final prefs = await SharedPreferences.getInstance();
@@ -853,7 +940,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     secondary: const Icon(Icons.video_library_outlined),
                     title: const Text('Other videos section'),
                     subtitle: const Text(
-                        'List videos on this device that are not in your library, such as camera clips and music videos'),
+                        'Videos outside your library'),
                     value: _otherVideos,
                     onChanged: (v) async {
                       final prefs = await SharedPreferences.getInstance();
@@ -887,7 +974,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile(
                   secondary: const Icon(Icons.offline_pin),
                   title: const Text('Offline image cache'),
-                  subtitle: const Text('Save posters and backdrops for offline use'),
+                  subtitle: const Text('Save posters for offline use'),
                   value: ImageCacheService.instance.enabled,
                   onChanged: (v) async {
                     await ImageCacheService.instance.setEnabled(v);
@@ -1324,8 +1411,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     secondary: const Icon(Icons.graphic_eq),
                     title: const Text('Match MPV audio (FFmpeg)'),
                     subtitle: const Text(
-                      'Decode audio with the same FFmpeg as the MPV engine, '
-                      'so both sound identical',
+                      'Match the MPV engine\'s audio',
                     ),
                     value: _ffmpegAudio,
                     onChanged: (v) async {
@@ -1486,33 +1572,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text(AppLocalizations.of(context).settingsMetadata),
               childrenPadding: const EdgeInsets.only(bottom: 8),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(
-                    'TMDB is the primary provider and is what fetches the '
-                    'details: title, overview, rating, genres, cast and season '
-                    'and episode data. Enter your own key (free at '
-                    'themoviedb.org → Settings → API → Create).\n\n'
-                    'TheTVDB is an optional fallback that mainly widens the '
-                    'pool of posters and backdrops you can pick from under '
-                    '⋮ → Change poster / Change backdrop, and covers some '
-                    'titles TMDB does not have.\n\n'
-                    'You can use either one on its own, or both — TMDB gives '
-                    'the richer detail, TheTVDB widens the artwork and covers '
-                    'what TMDB lacks.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white54,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
                  TvTile(
                    leading: const Icon(Icons.movie),
                    title: Text(AppLocalizations.of(context).settingsTmdbApiKey),
                    subtitle: Text(
                      _tmdbKey.isEmpty
-                         ? 'Not set — required for details, season and episode data'
-                         : 'Set (${_tmdbKey.substring(0, 4)}…${_tmdbKey.substring(_tmdbKey.length - 4)}) · fetches all details',
+                         ? 'Not set'
+                         : 'Set (${_tmdbKey.substring(0, 4)}…${_tmdbKey.substring(_tmdbKey.length - 4)})',
                    ),
                    onTap: _editTmdbKey,
                  ),
@@ -1527,61 +1593,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
                    ),
                    onTap: _editTheTvdbCredentials,
                  ),
+                 // Adult metadata (issue #46 part 1). TMDB is asked
+                 // include_adult=false everywhere by default, so an adult title
+                 // resolves to no match at all - measured live: query=hentai
+                 // returns 0 adult results with it false, 4 with it true.
+                 SwitchListTile(
+                   secondary: const Icon(Icons.block),
+                   title: const Text('Include adult content'),
+                   subtitle: const Text('Allow matches for adult titles'),
+                   value: _includeAdult,
+                   onChanged: _setIncludeAdult,
+                 ),
                  // Which provider resolves metadata (Settings toggle). This is
                  // a real choice, not the old fallback switch: picking TheTVDB
                  // makes it the PRIMARY resolver, so a user with only a
                  // TheTVDB key never queries TMDB at all.
-                 Padding(
-                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.start,
-                     children: [
-                       const Text('Metadata provider'),
-                       const SizedBox(height: 8),
-                       SegmentedButton<MetadataProviderChoice>(
-                         segments: const [
-                           ButtonSegment(
-                             value: MetadataProviderChoice.tmdb,
-                             label: Text('TMDB'),
-                             icon: Icon(Icons.movie, size: 18),
-                           ),
-                           ButtonSegment(
-                             value: MetadataProviderChoice.theTvdb,
-                             label: Text('TheTVDB'),
-                             icon: Icon(Icons.travel_explore, size: 18),
-                           ),
-                         ],
-                         selected: {_metadataProvider},
-                         onSelectionChanged: (selection) =>
-                             _setMetadataProvider(selection.first),
-                       ),
-                       const SizedBox(height: 6),
-                       Text(
-                         _metadataProvider == MetadataProviderChoice.tmdb
-                             ? 'TMDB resolves everything. TheTVDB is used only '
-                                 'as a fallback, if you enable it below.'
-                             : 'TheTVDB resolves everything. TMDB is not queried.',
-                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                               color: Colors.white54,
+                 //
+                 // The "External" segment (issue #46 part 2) only appears once
+                 // an adapter has actually registered - offering a choice that
+                 // resolves nothing would be worse than not offering it.
+                 if (_externalAdapters.isNotEmpty)
+                   Padding(
+                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       children: [
+                         const Text('Metadata provider'),
+                         const SizedBox(height: 8),
+                         SegmentedButton<MetadataProviderChoice>(
+                           segments: [
+                             const ButtonSegment(
+                               value: MetadataProviderChoice.tmdb,
+                               label: Text('TMDB'),
+                               icon: Icon(Icons.movie, size: 18),
                              ),
+                             const ButtonSegment(
+                               value: MetadataProviderChoice.theTvdb,
+                               label: Text('TheTVDB'),
+                               icon: Icon(Icons.travel_explore, size: 18),
+                             ),
+                             ButtonSegment(
+                               value: MetadataProviderChoice.external,
+                               label: Text(
+                                 _externalAdapters.length == 1
+                                     ? _externalAdapters.first.label
+                                     : 'External',
+                               ),
+                               icon: const Icon(Icons.extension, size: 18),
+                             ),
+                           ],
+                           selected: {_metadataProvider},
+                           onSelectionChanged: (selection) =>
+                               _setMetadataProvider(selection.first),
+                         ),
+                         const SizedBox(height: 6),
+                         Text(
+                           _providerHelpText(),
+                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                 color: Colors.white54,
+                               ),
+                         ),
+                       ],
+                     ),
+                   ),
+                 // When an external provider is primary, ONLY its own field is
+                 // shown and TheTVDB becomes an opt-in fallback for it - not for
+                 // TMDB, which is not the resolver in that mode.
+                 if (_externalSelected)
+                   ..._externalAdapters.map(
+                     (adapter) => TvTile(
+                       leading: const Icon(Icons.extension),
+                       title: Text('${adapter.label} API key'),
+                       subtitle: const Text(
+                         'Primary provider',
                        ),
-                     ],
+                       onTap: () => _editExternalAdapter(adapter),
+                     ),
                    ),
-                 ),
-                 SwitchListTile(
-                   secondary: const Icon(Icons.merge_type),
-                   title: const Text('Use TheTVDB as fallback'),
-                   subtitle: const Text(
-                     'Only used when TMDB is the selected provider',
+                 if (_showTheTvdbFallbackSwitch)
+                   SwitchListTile(
+                     secondary: const Icon(Icons.merge_type),
+                     title: const Text('Use TheTVDB as fallback'),
+                     subtitle: Text(
+                       _externalSelected
+                           ? 'TheTVDB is a fallback for the external provider here'
+                           : 'Only used when TMDB is the selected provider',
+                     ),
+                     value: _theTvdbFallback && _theTvdbKey.isNotEmpty,
+                     onChanged: _theTvdbKey.isEmpty
+                         ? null
+                         : (value) => _setTheTvdbFallback(value),
                    ),
-                   value: _metadataProvider == MetadataProviderChoice.tmdb &&
-                       _theTvdbFallback &&
-                       _theTvdbKey.isNotEmpty,
-                   onChanged: (_metadataProvider != MetadataProviderChoice.tmdb ||
-                           _theTvdbKey.isEmpty)
-                       ? null
-                       : (value) => _setTheTvdbFallback(value),
-                 ),
                ],
 
             ),
@@ -1767,7 +1869,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.restore),
                 title: const Text('Restore Purchases'),
-                subtitle: const Text('Open paywall to restore or view your subscription'),
+                subtitle: const Text('Restore or view subscription'),
                 onTap: () => showPaywall(context),
               ),
               Divider(color: Theme.of(context).dividerColor),
@@ -2284,7 +2386,7 @@ class _LayoutSection extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.palette_outlined),
                   title: const Text('Accent colour'),
-                  subtitle: const Text('Applies to buttons, highlights and the player UI'),
+                  subtitle: const Text('Buttons, highlights, player UI'),
                   trailing: Container(
                     width: 26,
                     height: 26,

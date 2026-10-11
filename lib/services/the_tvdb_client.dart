@@ -19,7 +19,7 @@ const String theTvdbArtworkBaseUrl = 'https://artworks.thetvdb.com';
 /// Distinct from the TheTVDB *fallback* switch: the fallback only lets TheTVDB
 /// rescue a title TMDB has no match for, whereas choosing TheTVDB here makes it
 /// the PRIMARY resolver, so a user holding only a TheTVDB key never queries TMDB.
-enum MetadataProviderChoice { tmdb, theTvdb }
+enum MetadataProviderChoice { tmdb, theTvdb, external }
 
 /// Resolution order for the given configuration.
 ///
@@ -35,7 +35,29 @@ List<MetadataProvider> providerOrderFor({
   required bool tmdbConfigured,
   required bool theTvdbConfigured,
   required bool theTvdbFallbackEnabled,
+  bool externalConfigured = false,
 }) {
+  // An external adapter (issue #46 part 2, e.g. AVDb) is the PRIMARY resolver
+  // when chosen, exactly like TheTVDB: TheTVDB becomes an opt-in fallback for
+  // it rather than the other way round, which is why the Settings fallback
+  // switch is re-pointed at it in that mode.
+  if (choice == MetadataProviderChoice.external) {
+    if (externalConfigured) {
+      return [
+        MetadataProvider.external,
+        if (tmdbConfigured) MetadataProvider.tmdb,
+        if (theTvdbConfigured && theTvdbFallbackEnabled) MetadataProvider.theTvdb,
+      ];
+    }
+    // Nothing usable behind the external choice: fall through to the built-ins
+    // rather than resolving nothing at all.
+    return providerOrderFor(
+      choice: MetadataProviderChoice.tmdb,
+      tmdbConfigured: tmdbConfigured,
+      theTvdbConfigured: theTvdbConfigured,
+      theTvdbFallbackEnabled: theTvdbFallbackEnabled,
+    );
+  }
   if (choice == MetadataProviderChoice.theTvdb) {
     if (theTvdbConfigured) {
       return [MetadataProvider.theTvdb, ...(tmdbConfigured ? [MetadataProvider.tmdb] : [])];
@@ -330,9 +352,12 @@ class TheTvdbClient {
 
   static Future<MetadataProviderChoice> providerChoice() async {
     final preferences = await SharedPreferences.getInstance();
-    return preferences.getString(providerPrefsKey) == 'theTvdb'
-        ? MetadataProviderChoice.theTvdb
-        : MetadataProviderChoice.tmdb;
+    final stored = preferences.getString(providerPrefsKey);
+    return MetadataProviderChoice.values.firstWhere(
+      (choice) => choice.name == stored,
+      // Unknown or absent: TMDB, which is the pre-existing default.
+      orElse: () => MetadataProviderChoice.tmdb,
+    );
   }
 
   static Future<void> setProviderChoice(MetadataProviderChoice choice) async {
