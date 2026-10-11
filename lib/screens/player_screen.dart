@@ -402,6 +402,17 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// Volume boost (1.0–3.0) and Night Mode — persisted and re-applied on open.
   double _audioBoost = 1.0;
+
+  /// The `af` string currently pushed to mpv, so the filter chain is rebuilt
+  /// only when it actually differs. The volume gesture calls this on every
+  /// drag update; rebuilding an mpv filter graph per frame is expensive and
+  /// audibly rough, and mpv has no throttling of its own here.
+  String? _mpvAppliedFilter;
+
+  /// Whether the volume gesture may run past 100% (Settings -> Audio ->
+  /// Volume boost). When false the gesture is clamped to the stock 100% and
+  /// this behaves exactly like any other player's volume swipe.
+  bool _volumeBoostEnabled = false;
   bool _nightMode = false;
 
   int _subtitleDelayMs = 0;
@@ -572,6 +583,28 @@ class _PlayerScreenState extends State<PlayerScreen>
         // Persistence unavailable; keep the defaults.
       }
 
+      // Audio/settings state, loaded for BOTH engines.
+      //
+      // This block used to sit BELOW the MPV early-return below, which meant
+      // "Play with MPV" started with none of it applied: the boost toggle read
+      // false, the volume gesture was clamped to 100%, night mode was off and
+      // `_audioBoost` was 1.0. #41 read as "MPV ignores volume boost" and was
+      // chased through the engine and the filter chain when the real cause was
+      // one `return` in the wrong place. Anything the two engines share must
+      // be loaded BEFORE either engine branches.
+      try {
+        // `_audioBoost` is deliberately NOT loaded: volume boost is session
+        // state, not a preference. It is reached with the swipe gesture and
+        // starts back at 1.0 (100%) every time a video is opened, so returning
+        // to a film never reopens at 200% of its own accord. Only the toggle
+        // that permits going past 100% is a real setting.
+        _audioBoost = 1.0;
+        _volumeBoostEnabled = await VolumeBoostToggleStore.load();
+        _nightMode = await NightModeStore.load();
+        _subtitleDelayMs = (await SubtitleStyle.load()).delayMs;
+        _decoderMode = await DecoderModeStore.load();
+      } catch (_) {}
+
       // The user chose the libmpv engine on the details screen ("Play with
       // MPV"): start it directly — no ExoPlayer platform view, and no auto
       // jump to mpv later. libmpv itself runs hardware-first
@@ -582,13 +615,6 @@ class _PlayerScreenState extends State<PlayerScreen>
         unawaited(LastEngineStore.save(_resumeKey, 'mpv'));
         return;
       }
-
-      try {
-        _audioBoost = await PlaybackBoostStore.load();
-        _nightMode = await NightModeStore.load();
-        _subtitleDelayMs = (await SubtitleStyle.load()).delayMs;
-        _decoderMode = await DecoderModeStore.load();
-      } catch (_) {}
 
       _liveSpatial = '';
       unawaited(SystemControls.instance.clearSpatialAudioStatus());
@@ -2899,25 +2925,42 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _applyMpvVolume({double? baseFraction}) async {
     final p = _mpvPlayer;
     if (p == null) return;
+    // The boost is NOT folded into mpv's `volume` any more (#41). On an
+    // `audiotrack` output mpv can apply volume natively at the output stage,
+    // AFTER the audio filter chain, which means a limiter placed as a filter
+    // could never catch it — the boost clipped instead of being limited.
+    // Filter-chain gain with an `alimiter` behind it is the only ordering that
+    // actually bounds the peaks.
     final vol = mpvVolumePercent(
       baseFraction: baseFraction ?? 1.0,
-      audioBoost: _audioBoost,
+      boost: _audioBoost,
       nightMode: _nightMode,
     );
+    final filter = mpvBoostFilter(_audioBoost, nightMode: _nightMode);
     final platform = p.platform;
-    if (platform is NativePlayer) {
-      try {
-        // Must precede setVolume: mpv clamps volume to volume-max. Fixed at the
-        // ceiling rather than tracking `vol` — a moving ceiling would clamp the
-        // volume gesture the moment it pushed past the last boosted value.
-        await platform.setProperty('volume-max', '${kMpvVolumeMax.round()}');
-      } catch (_) {}
+    final wanted = filter ?? '';
+    String? applied;
+    final changed = _mpvAppliedFilter != wanted;
+    try {
+      await p.setVolume(vol);
+      if (platform is NativePlayer && changed) {
+        await platform.setProperty('af', wanted);
+        // Read it back. A rejected or mis-tokenised `af` is NOT an exception —
+        // mpv just ends up with no filter — which is exactly how the boost
+        // silently did nothing on MPV while Media3 reached 200%. Logging the
+        // decision and the result, never just "we sent it".
+        applied = await platform.getProperty('af');
+        _mpvAppliedFilter = wanted;
+      }
+    } catch (e) {
+      debugPrint('mpv: volume apply failed: $e');
+      return;
     }
-    await p.setVolume(vol);
     debugPrint(
-      'mpv: volume -> ${vol.toStringAsFixed(0)} '
-      '(base=${((baseFraction ?? 1.0) * 100).toStringAsFixed(0)}%, '
-      'boost=${_audioBoost.toStringAsFixed(1)}${_nightMode ? ', night' : ''})',
+      'mpv: volume -> ${vol.toStringAsFixed(0)} base, '
+      'boost=${_audioBoost.toStringAsFixed(2)}${_nightMode ? ', night' : ''}, '
+      '${changed ? 'af set' : 'af unchanged'} '
+      'readback="${applied ?? '<unchanged>'}"',
     );
   }
 
@@ -4034,7 +4077,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           : await SystemControls.instance.getSystemVolume();
       if (!mounted || !_swipeGestureActive) return;
       setState(() {
-        _swipeBase = current.clamp(0.0, 1.0);
+        _swipeBase = _volumeSwipeBase(current);
         _applySwipeValue();
       });
       return;
@@ -4047,7 +4090,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           : await exo.getSystemVolume();
       if (!mounted || !_swipeGestureActive) return;
       setState(() {
-        _swipeBase = current.clamp(0.0, 1.0);
+        _swipeBase = _volumeSwipeBase(current);
         _applySwipeValue();
       });
     } catch (_) {
@@ -4056,11 +4099,30 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  /// The value the volume gesture starts from.
+  ///
+  /// The system only reports 0-100%, but when boost is on the user may have
+  /// left the volume at 150%. Seeding from the raw system value would snap the
+  /// gesture (and the on-screen percentage) back to 100% the moment they
+  /// touched the screen, so the effective boost level wins whenever it is
+  /// above what the system can report.
+  double _volumeSwipeBase(double systemVolume) {
+    if (_swipeType != _SwipeType.volume) return systemVolume.clamp(0.0, 1.0);
+    if (!_volumeBoostEnabled) return systemVolume.clamp(0.0, 1.0);
+    return _audioBoost.clamp(0.0, kMaxVolumeBoost);
+  }
+
   /// Computes base + accumulated delta, updates the overlay, and pushes the
   /// result to the OS. Media3 routes through its own ExoPlayerController
   /// channel; MPV routes through the engine-agnostic `SystemControls`.
   void _applySwipeValue() {
-    final next = (_swipeBase + _swipeDragDelta).clamp(0.0, 1.0);
+    final isVolume = _swipeType == _SwipeType.volume;
+    // Brightness keeps its own 0-1 scale; volume gains a 0-2 scale so the
+    // gesture can travel past 100% into boost when that is enabled.
+    final next = (_swipeBase + _swipeDragDelta).clamp(
+      0.0,
+      isVolume ? volumeCeiling(boostEnabled: _volumeBoostEnabled) : 1.0,
+    );
     _swipeCurrentValue = next;
     if (_swipeType == _SwipeType.brightness) {
       if (_mpvReady) {
@@ -4072,20 +4134,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       } else {
         _exo?.setBrightness(next);
       }
-    } else if (_swipeType == _SwipeType.volume) {
+    } else if (isVolume) {
+      // One split, used by both engines, so the OS volume and the engine
+      // boost can never drift apart (#41: they used to, which is exactly how
+      // "boost works until I touch volume" happened).
+      final split = splitVolume(next, boostEnabled: _volumeBoostEnabled);
+      final boostChanged = split.boost != _audioBoost;
+      _audioBoost = split.boost;
       if (_mpvReady) {
         // System volume on the mpv fallback too — same UX as Media3.
-        unawaited(SystemControls.instance.setSystemVolume(next));
-        // Keep mpv's own mixer in sync so the engine's volume doesn't drift if
-        // the user navigates away and the app forgets the gesture state.
-        //
-        // Issue #41: this used to write `next * 100` — the RAW system volume —
-        // straight into mpv, discarding the boost and night-mode gain, so the
-        // audio went quiet the instant the user dragged volume. mpv has no
-        // separate gain stage, so the multiplier has to ride along here too.
-        unawaited(_applyMpvVolume(baseFraction: next));
+        unawaited(SystemControls.instance.setSystemVolume(split.system));
+        unawaited(_applyMpvVolume(baseFraction: split.system));
       } else {
-        _exo?.setSystemVolume(next);
+        _exo?.setSystemVolume(split.system);
+        if (boostChanged) _exo?.setAudioBoost(split.boost);
       }
     }
   }
@@ -4645,8 +4707,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         (label: AppLocalizations.of(context).playerStream, value: 'Server transcoding'),
       if (Platform.isAndroid && _liveSpatial == 'on')
         (label: AppLocalizations.of(context).playerSpatialAudio, value: 'On'),
-      if (Platform.isAndroid && _audioBoost > 1.01)
-        (label: AppLocalizations.of(context).playerVolumeBoost, value: '${_audioBoost.toStringAsFixed(1)}×'),
+      if (Platform.isAndroid && _volumeBoostEnabled)
+        (
+          label: AppLocalizations.of(context).playerVolumeBoost,
+          value: _audioBoost > 1.01
+              ? '${(_audioBoost * 100).round()}%'
+              : 'Off'
+        ),
       if (Platform.isAndroid && _nightMode) (label: AppLocalizations.of(context).playerNightMode, value: 'On'),
       if (Platform.isAndroid && _liveBass > 0)
         (label: AppLocalizations.of(context).playerBassBoost, value: '$_liveBass/3'),
@@ -5499,7 +5566,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     bool expandSubtitleDelay = false;
     bool expandDecoder = false;
     bool expandToneMap = false;
-    bool expandBoost = false;
     bool expandBass = false;
     await showModalBottomSheet<void>(
       context: context,
@@ -6004,65 +6070,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     const Divider(color: Colors.white12, height: 1),
                   ],
-                  // Volume Boost + Night Mode are Android-only (Media3
-                  // LoudnessEnhancer) — AVPlayer caps volume at 1.0 and has
+                  // Night Mode and Bass Boost are Android-only (Media3
+                  // DynamicsProcessing) — AVPlayer caps volume at 1.0 and has
                   // no DRC, so the toggles would be cosmetic no-ops on iOS.
                   if (defaultTargetPlatform == TargetPlatform.android) ...[
-                    _tvListTile(
-                      leading: const Icon(Icons.volume_up, color: Colors.white70),
-                      title: Text(AppLocalizations.of(context).playerVolumeBoostTitle, style: TextStyle(color: Colors.white)),
-                      subtitle: Text(_audioBoost > 1.01 ? '${_audioBoost.toStringAsFixed(1)}×' : 'Off', style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                      trailing: Icon(expandBoost ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
-                      onTap: () => setSheet(() => expandBoost = !expandBoost),
-                    ),
-                    if (expandBoost)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                        child: Column(
-                          children: [
-                            Slider(
-                              value: _audioBoost.clamp(1.0, 3.0),
-                              min: 1.0,
-                              max: 3.0,
-                              divisions: 20,
-                              label: '${_audioBoost.toStringAsFixed(1)}×',
-                              onChanged: (v) {
-                                final b = double.parse(v.toStringAsFixed(1));
-                                setState(() => _audioBoost = b);
-                                setSheet(() {});
-                              },
-                              onChangeEnd: (v) async {
-                                final b = double.parse(v.toStringAsFixed(1));
-                                setState(() => _audioBoost = b);
-                                if (_mpvReady) {
-                                  await _applyMpvVolume();
-                                } else {
-                                  _exo?.setAudioBoost(b);
-                                }
-                                await PlaybackBoostStore.save(b);
-                              },
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                TextButton(onPressed: () async {
-                                  setState(() => _audioBoost = 1.0);
-                                  setSheet(() {});
-                                  if (_mpvReady) {
-                                    await _applyMpvVolume();
-                                  } else {
-                                    _exo?.setAudioBoost(1.0);
-                                  }
-                                  await PlaybackBoostStore.save(1.0);
-                                }, child: Text(AppLocalizations.of(context).commonReset)),
-                                Text('${_audioBoost.toStringAsFixed(1)}×', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                SizedBox(width: 48),
-                              ],
-                            ),
-                            Text('LoudnessEnhancer (0–1500 mB)', style: TextStyle(color: Colors.white38, fontSize: 11)),
-                          ],
-                        ),
-                      ),
+                    // Volume Boost no longer lives here. It is a gesture, not a
+                    // slider: swipe the right half of the player past 100% and
+                    // the extra travel becomes over-amplification, gated by
+                    // Settings -> Audio -> Volume boost. A slider here could
+                    // only ever set a value the gesture then overwrites, which
+                    // is the #41 "boost works until I touch volume" bug in a
+                    // second location.
                     // Bass Boost appears only while platform spatial audio
                     // is actually engaged — it exists to offset the HRTF
                     // low-end thinning of virtualized surround.
@@ -7298,7 +7316,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ClipRRect(
                           borderRadius: BorderRadius.circular(2),
                           child: LinearProgressIndicator(
-                            value: _swipeCurrentValue,
+                            // Normalised: the volume gesture now runs 0-2.0
+                            // (100% + boost) and this widget asserts a 0..1
+                            // value. Dividing by the active ceiling also makes
+                            // the bar visibly fill through the boost half
+                            // rather than pinning at the end.
+                            value: _swipeCurrentValue /
+                                (_swipeType == _SwipeType.volume
+                                    ? volumeCeiling(
+                                        boostEnabled: _volumeBoostEnabled)
+                                    : 1.0),
                             minHeight: 4,
                             backgroundColor: Colors.white24,
                             valueColor: const AlwaysStoppedAnimation(

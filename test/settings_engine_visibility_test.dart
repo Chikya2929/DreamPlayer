@@ -99,7 +99,6 @@ void main() {
   Finder spatialTile(WidgetTester t) => find.text('Spatial audio');
   Finder toneMapTile(WidgetTester t) => find.text(l(t, (x) => x.settingsToneMapMode));
   Finder downmixTile(WidgetTester t) => find.text(l(t, (x) => x.settingsMpvNormalizeDownmix));
-  Finder ffmpegAudioTile(WidgetTester t) => find.text('Match MPV audio (FFmpeg)');
   Finder volumeBoostTile(WidgetTester t) => find.text(l(t, (x) => x.settingsVolumeBoost));
   Finder nightModeTile(WidgetTester t) => find.text(l(t, (x) => x.settingsNightMode));
 
@@ -132,18 +131,29 @@ void main() {
       await pumpWithEngine(tester, DefaultEngine.media3);
       await openAudio(tester);
       expect(downmixTile(tester), findsNothing);
-      expect(ffmpegAudioTile(tester), findsOneWidget);
     });
   });
 
-  testWidgets('Audio: pinning libmpv hides the Media3-only FFmpeg option', (
+  testWidgets('Audio: pinning libmpv shows the MPV-only downmix option', (
     tester,
   ) async {
     await run(tester, () async {
       await pumpWithEngine(tester, DefaultEngine.mpv);
       await openAudio(tester);
       expect(downmixTile(tester), findsOneWidget);
-      expect(ffmpegAudioTile(tester), findsNothing);
+    });
+  });
+
+  // "Match MPV audio (FFmpeg)" was a #41 DIAGNOSTIC, not a feature: it forced
+  // Media3 onto libmpv's FFmpeg decoder so the two engines could be compared.
+  // The loudness gap turned out to be the MPV branch returning before the
+  // audio settings were loaded, so the diagnostic is gone rather than left
+  // as a way to push the primary engine onto software audio decode.
+  testWidgets('Audio: the FFmpeg match diagnostic is gone', (tester) async {
+    await run(tester, () async {
+      await pumpWithEngine(tester, DefaultEngine.media3);
+      await openAudio(tester);
+      expect(find.text('Match MPV audio (FFmpeg)'), findsNothing);
     });
   });
 
@@ -180,7 +190,6 @@ void main() {
       expect(decoderTile(tester), findsOneWidget);
       await openAudio(tester);
       expect(downmixTile(tester), findsOneWidget);
-      expect(ffmpegAudioTile(tester), findsOneWidget);
     });
   });
 
@@ -191,7 +200,6 @@ void main() {
       expect(decoderTile(tester), findsOneWidget);
       await openAudio(tester);
       expect(downmixTile(tester), findsOneWidget);
-      expect(ffmpegAudioTile(tester), findsOneWidget);
     });
   });
 }

@@ -113,22 +113,23 @@ class PlaybackSpeedStore {
   }
 }
 
-/// Persists the volume boost factor (1.0 = off, 3.0 = +1500 mB).
-class PlaybackBoostStore {
-  PlaybackBoostStore._();
+/// Whether over-amplification past 100% is allowed at all.
+///
+/// Default OFF. The volume gesture only extends to 200% when this is on, so
+/// installing the app never silently amplifies audio the user did not ask for.
+class VolumeBoostToggleStore {
+  VolumeBoostToggleStore._();
 
-  static const String _prefsKey = 'dreamplayer.audioBoost';
+  static const String _prefsKey = 'dreamplayer.volumeBoostEnabled';
 
-  static Future<double> load() async {
+  static Future<bool> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getDouble(_prefsKey);
-    if (v == null) return 1.0;
-    return v.clamp(1.0, 3.0);
+    return prefs.getBool(_prefsKey) ?? false;
   }
 
-  static Future<void> save(double boost) async {
+  static Future<void> save(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_prefsKey, boost.clamp(1.0, 3.0));
+    await prefs.setBool(_prefsKey, enabled);
   }
 }
 

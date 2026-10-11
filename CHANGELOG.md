@@ -5,7 +5,35 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ## Unreleased
 
-### Added
+### Fixed
+
+- **Volume boost is smooth instead of crushing the mix (issue #41).** The
+  reported symptom was "background music plays, but the vocals/dialogue become
+  inaudible or disappear entirely" — the signature of over-compression rather
+  than a level or downmix fault. Volume boost asked Android's
+  `LoudnessEnhancer` for up to 15 dB of make-up gain; that class is a *fixed*
+  compressor the app cannot tune, it has no limiter, its behaviour varies by
+  vendor, and a real Android player measured it clipping audibly from about
+  6 dB. Make-up gain lifted everything, the loudest material (music, bass, LFE)
+  hit the ceiling first, and the compressor pulled gain back by as much as the
+  loudest band demanded — applied to the whole mix. Dialogue sits mid-level in
+  the centre channel, so it was dragged down while the distorted music survived
+  and read as "louder". Boost now runs through `DynamicsProcessing`: a
+  compressor (2:1 above −20 dBFS) followed by a limiter at −1 dBFS, so peaks are
+  limited instead of clipped and a high boost gets denser rather than harsher.
+  `LoudnessEnhancer` is kept only as a fallback on older Android versions.
+
+### Changed
+
+- **Volume boost is now a gesture, not a slider.** Settings → Audio has a new
+  **Volume boost** toggle (off by default). With it on, swiping up the right
+  half of the player runs 0–200%: the first 100% is the system volume as usual,
+  and past that the system volume stays at max while the extra travel becomes
+  over-amplification up to 2×. Both old sliders — the player ⋮ sheet and
+  Settings → Audio — have been removed, because a slider there could only set a
+  value the gesture immediately overwrote. The MPV engine stages the same boost
+  through its audio filter chain (gain, then a −1 dBFS limiter) so it cannot
+  clip the way scaling mpv's own volume did.
 
 - **External USB drives and SD cards now appear in the file browser
   (issue #48).** The browser scanned `/storage` and skipped any entry named

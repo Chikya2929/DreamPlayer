@@ -10,6 +10,7 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.graphics.Color
+import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.Build
@@ -122,17 +123,18 @@ class ExoPlayerView(
 
     // ---- Volume Boost + Night Mode (LoudnessEnhancer on AudioTrack session) ----
     private var loudnessEnhancer: LoudnessEnhancer? = null
-    private var audioBoost: Float = run {
-        val p = activity.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val raw = p.all["flutter.dreamplayer.audioBoost"]
-        when (raw) {
-            is Float -> raw
-            is Double -> raw.toFloat()
-            is Number -> raw.toFloat()
-            is String -> raw.toFloatOrNull() ?: 1.0f
-            else -> 1.0f
-        }.coerceIn(1.0f, 3.0f)
-    }
+    /// Preferred boost path (#41). A real compressor+limiter; see
+    /// DynamicsBoost. Falls back to [loudnessEnhancer] when unavailable.
+    private var dynamicsBoost: DynamicsProcessing? = null
+    /// Volume boost is SESSION state, never restored.
+    ///
+    /// It used to be seeded from `flutter.dreamplayer.audioBoost`, which this
+    /// class also wrote. That persisted the value across app restarts, so a
+    /// session that ended at 200% reopened at 200% — the user has to start
+    /// each video from a known 100% and deliberately swipe past it. Starting at
+    /// unity here also means the stale pref can no longer cause a briefly
+    /// boosted first frame before Dart pushes 1.0 down.
+    private var audioBoost: Float = 1.0f
     private var nightModeEnabled: Boolean = run {
         val p = activity.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         p.getBoolean("flutter.dreamplayer.nightMode", false)
@@ -261,6 +263,8 @@ class ExoPlayerView(
     }
 
     private fun applyAudioEffects() {
+        try { dynamicsBoost?.release() } catch (_: Exception) {}
+        dynamicsBoost = null
         try { loudnessEnhancer?.release() } catch (_: Exception) {}
         loudnessEnhancer = null
         try { bassBoostFx?.release() } catch (_: Exception) {}
@@ -281,16 +285,35 @@ class ExoPlayerView(
         }
         if (audioBoost <= 1.0f && !nightModeEnabled) return
         if (!sessionOk) return
+        // Boost in dB. Capped at +12 dB: the limiter makes higher values
+        // denser rather than louder, and past this point a movie mix has no
+        // headroom left to give.
+        val boostDb = (20f * kotlin.math.log10(audioBoost.toDouble()).toFloat()) +
+                (if (nightModeEnabled) 4f else 0f)
+        val cappedDb = boostDb.coerceIn(0f, 12f)
+
+        // Preferred path: real compressor + limiter (issue #41 — the old
+        // LoudnessEnhancer path clipped audibly well below this gain and
+        // crushed dialogue out of the mix).
+        if (DynamicsBoost.supported) {
+            val channels = player.audioFormat?.channelCount ?: 2
+            val attached = DynamicsBoost.attach(sessionId, cappedDb, channels)
+            if (attached != null) {
+                dynamicsBoost = attached
+                return
+            }
+            // Fell through deliberately: fall back rather than silently
+            // giving the user no boost at all.
+        }
+
+        // Fallback: API < 28, or a vendor with no DynamicsProcessing. This is
+        // the old, known-clipping behaviour but it is better than silence.
         try {
             val enhancer = LoudnessEnhancer(sessionId)
-            val gainMb = when {
-                nightModeEnabled && audioBoost <= 1.0f -> 400
-                nightModeEnabled -> (((audioBoost - 1f) * 750).toInt() + 300).coerceIn(0, 1500)
-                else -> (((audioBoost - 1f) * 750).toInt()).coerceIn(0, 1500)
-            }
-            enhancer.setTargetGain(gainMb)
+            enhancer.setTargetGain((cappedDb * 100).toInt().coerceIn(0, 1500))
             enhancer.enabled = true
             loudnessEnhancer = enhancer
+            Log.w("ExoPlayerView", "using LoudnessEnhancer fallback at ${cappedDb}dB")
         } catch (e: Exception) {
             Log.w("ExoPlayerView", "LoudnessEnhancer failed", e)
         }
@@ -1663,9 +1686,7 @@ class ExoPlayerView(
                 }
                 "setAudioBoost" -> {
                     val boost = call.argument<Number>("boost")?.toFloat() ?: 1.0f
-                    audioBoost = boost.coerceIn(1.0f, 3.0f)
-                    activity.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                        .edit().putFloat("flutter.dreamplayer.audioBoost", audioBoost).apply()
+                    audioBoost = boost.coerceIn(1.0f, 2.0f)
                     applyAudioEffects()
                     emit()
                     result.success(null)
@@ -2634,6 +2655,8 @@ class ExoPlayerView(
         stopPositionTicker()
         unregisterSpatialListener()
         PlaybackManager.release(activity)
+        try { dynamicsBoost?.release() } catch (_: Exception) {}
+        dynamicsBoost = null
         try { loudnessEnhancer?.release() } catch (_: Exception) {}
         loudnessEnhancer = null
         try { bassBoostFx?.release() } catch (_: Exception) {}

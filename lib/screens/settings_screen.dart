@@ -66,8 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   DecoderMode _decoderMode = DecoderMode.auto;
   DefaultEngine _defaultEngine = DefaultEngine.ask;
   ToneMapMode _toneMapMode = ToneMapMode.sdr;
-  double _audioBoost = 1.0;
-  bool _ffmpegAudio = false;
+  bool _volumeBoostEnabled = false;
   bool _nightMode = false;
   bool _simklConnected = false;
   DateTime? _simklLastSync;
@@ -692,16 +691,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadAudioFilters() async {
     try {
-      final boost = await PlaybackBoostStore.load();
       final night = await NightModeStore.load();
-      final ffmpegAudio =
-          (await SharedPreferences.getInstance()).getBool(kFfmpegAudioKey) ??
-          false;
+      final boostEnabled = await VolumeBoostToggleStore.load();
       if (mounted) {
         setState(() {
-          _audioBoost = boost;
           _nightMode = night;
-          _ffmpegAudio = ffmpegAudio;
+          _volumeBoostEnabled = boostEnabled;
         });
       }
     } catch (_) {}
@@ -1422,83 +1417,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         // anyway.
                       },
                     ),
-                  // Issue #41. The libmpv engine decodes every track with
-                  // libavcodec (`ad: ffmpeg`); Media3 normally prefers the
-                  // platform MediaCodec decoders. Two different decoders means
-                  // two different loudness for the same file, which is what
-                  // made the engines sound mismatched. Turning this on routes
-                  // Media3's audio through the same FFmpeg extension so there
-                  // is one decoder for both.
-                  //
-                  // TV/HDMI passthrough still wins: the passthrough branch in
-                  // PlayerCodecs.kt is checked before this one, so bitstream
-                  // output is untouched when it is enabled.
-                  if (_showMedia3Settings)
-                    SwitchListTile(
-                    secondary: const Icon(Icons.graphic_eq),
-                    title: const Text('Match MPV audio (FFmpeg)'),
-                    subtitle: const Text(
-                      'Match the MPV engine\'s audio',
+                  // Volume boost is a swipe gesture rather than a value of its own;
+                  // see `lib/utils/mpv_volume.dart` and `_applySwipeValue`.
+                  SwitchListTile(
+                    secondary: const Icon(Icons.volume_up),
+                    title: Text(
+                      AppLocalizations.of(context).settingsVolumeBoost,
                     ),
-                    value: _ffmpegAudio,
+                    subtitle: const Text('Swipe past 100% for up to 200%'),
+                    value: _volumeBoostEnabled,
                     onChanged: (v) async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setBool(kFfmpegAudioKey, v);
-                      if (mounted) setState(() => _ffmpegAudio = v);
-                    },
-                  ),
-                  TvTile(
-                    leading: const Icon(Icons.volume_up),
-                    title: Text(AppLocalizations.of(context).settingsVolumeBoost),
-                    subtitle: Text(
-                      _audioBoost > 1.01
-                          ? '${_audioBoost.toStringAsFixed(1)}× (LoudnessEnhancer)'
-                          : 'Off — 1.0×',
-                    ),
-                    onTap: () async {
-                      double temp = _audioBoost;
-                      final picked = await showDialog<double>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: Text(AppLocalizations.of(context).playerVolumeBoostTitle),
-                          content: StatefulBuilder(
-                            builder: (context, setD) => Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Slider(
-                                  value: temp.clamp(1.0, 3.0),
-                                  min: 1.0,
-                                  max: 3.0,
-                                  divisions: 20,
-                                  label: '${temp.toStringAsFixed(1)}×',
-                                  onChanged: (v) => setD(
-                                    () =>
-                                        temp = double.parse(v.toStringAsFixed(1)),
-                                  ),
-                                ),
-                                Text(
-                                  '${temp.toStringAsFixed(1)}×',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: Text(AppLocalizations.of(context).commonCancel),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, temp),
-            child: Text(AppLocalizations.of(context).commonSave),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (picked != null) {
-                        await PlaybackBoostStore.save(picked);
-                        if (mounted) setState(() => _audioBoost = picked);
-                      }
+                      await VolumeBoostToggleStore.save(v);
+                      if (mounted) setState(() => _volumeBoostEnabled = v);
                     },
                   ),
                   SwitchListTile(
