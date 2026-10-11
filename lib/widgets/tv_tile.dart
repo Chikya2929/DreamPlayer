@@ -22,6 +22,7 @@ class TvTile extends StatelessWidget {
     this.enabled = true,
     this.onTap,
     this.onLongPress,
+    this.selected = false,
   });
 
   final Widget? leading;
@@ -36,10 +37,14 @@ class TvTile extends StatelessWidget {
   /// secondary actions such as delete, which must never be the primary tap.
   final VoidCallback? onLongPress;
 
+  /// Selected state for multi-select (long-press then act).
+  final bool selected;
+
   @override
   Widget build(BuildContext context) {
     if (!isTvMode(context)) {
       return ListTile(
+        selected: selected,
         leading: leading,
         title: title,
         subtitle: subtitle,

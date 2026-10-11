@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/video_item.dart';
+import '../services/download_manager.dart';
 import '../services/file_browser.dart';
 import '../services/tmdb_client.dart';
 import '../services/resume_progress_helper.dart';
@@ -41,6 +42,25 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
   Map<String, int> _durationsMs = {};
 
   bool get _atRoot => _currentPath == null;
+
+  /// Paths selected by long-press (issue #48 follow-up).
+  ///
+  /// Selection is keyed by path, not by index, so it survives a rescan — the
+  /// roots list is rebuilt every time a drive is plugged in or the screen
+  /// resumes.
+  final Set<String> _selected = <String>{};
+  bool get _selectionActive => _selected.isNotEmpty;
+
+  void _toggleSelect(FileEntry entry) {
+    setState(() {
+      if (!_selected.add(entry.path)) _selected.remove(entry.path);
+    });
+  }
+
+  void _clearSelection() {
+    if (_selected.isEmpty) return;
+    setState(_selected.clear);
+  }
 
   @override
   void initState() {
@@ -102,9 +122,26 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
   }
 
   @override
+  /// Re-scan on every resume, not just when All Files Access is missing.
+  ///
+  /// Issue #48: a USB drive plugged in while the app was in the background
+  /// never appeared, because the resume handler only re-ran `_init` when
+  /// access was missing — and a user with access already granted stayed on the
+  /// root list computed before the drive existed. Resuming is also the moment
+  /// the platform finishes mounting the volume, so this is where a rescan
+  /// belongs.
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_hasAccess) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!_hasAccess) {
       _init();
+      return;
+    }
+    if (_currentPath == null) {
+      _loadRoots();
+    } else {
+      // Inside a folder: re-list it so files copied onto a freshly mounted
+      // drive show up too.
+      _load(_currentPath!);
     }
   }
 
@@ -285,6 +322,138 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
     return path.substring(0, index);
   }
 
+  /// Single-file "Download to device" from a row's own button.
+  ///
+  /// Same destination as the network downloader, so a file pulled off a USB
+  /// drive lands beside everything else in `<Downloads>/DreamPlayer/`.
+  Future<void> _copyOneToDownloads(FileEntry entry) async {
+    // Routed through DownloadManager, NOT a direct channel call: a large file
+    // copied on the platform thread froze the app, and the copy produced no
+    // progress, no notification and no home-screen entry. This is the same
+    // path an SMB download takes, so all three come for free.
+    await _enqueueCopies([entry]);
+  }
+
+  /// Copies every selected item into `<Downloads>/DreamPlayer/`.
+  ///
+  /// The browser-side "Download to device": the network downloader already
+  /// writes there, so a file copied off a USB drive joins the same folder and
+  /// shows up in the downloads list with everything else.
+  Future<void> _copySelectionToDownloads() async {
+    final paths = _selected.toList();
+    if (paths.isEmpty) return;
+    await _enqueueCopies(
+      paths.map((p) => _entries.firstWhere((e) => e.path == p)).toList(),
+    );
+  }
+
+  /// Queues [entries] as downloads into `<Downloads>/DreamPlayer/`.
+  ///
+  /// DownloadManager runs them one at a time with a progress bar, a foreground
+  /// notification and a row on the home screen's downloads list — identical to
+  /// an SMB download. Folders are skipped: a recursive copy is not a single
+  /// file transfer, and queueing it as one job would report a size it does not
+  /// know and cannot cancel meaningfully.
+  Future<void> _enqueueCopies(List<FileEntry> entries) async {
+    final manager = DownloadManager.instance;
+    var queued = 0;
+    final skipped = entries.where((e) => e.isDirectory).length;
+    for (final entry in entries) {
+      if (entry.isDirectory) continue;
+      try {
+        await manager.startDownload(_toVideoItem(entry));
+        queued++;
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start: ${entry.name}')),
+        );
+      }
+    }
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final parts = <String>[
+      if (queued > 0) 'Downloading ${queued == 1 ? '1 file' : '$queued files'}'
+          ' to Download/DreamPlayer',
+      if (skipped > 0) 'skipped $skipped '
+          '${skipped == 1 ? 'folder' : 'folders'}',
+    ];
+    messenger.showSnackBar(SnackBar(content: Text(parts.join(' · '))));
+  }
+
+  /// Deletes every selected file, after one confirmation for the whole batch.
+  ///
+  /// Irreversible, so the dialog names the count rather than "are you sure",
+  /// and the action is deliberately behind long-press + the overflow rather
+  /// than a swipe, so it cannot be hit by accident while scrolling.
+  Future<void> _confirmDeleteSelection() async {
+    final paths = _selected.toList();
+    if (paths.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${paths.length} '
+            '${paths.length == 1 ? 'item' : 'items'}?'),
+        content: Text(
+          _containsFolder
+              ? 'This permanently deletes the selected items, INCLUDING the '
+                  'contents of any folder, from the device. It cannot be '
+                  'undone.'
+              : 'This permanently deletes the selected files from the device. '
+                  'It cannot be undone.',
+          style: const TextStyle(height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    int deleted = 0;
+    final failures = <String>[];
+    for (final path in paths) {
+      final failure = await FileBrowserService.instance.deleteLocalFile(path);
+      if (failure == null) {
+        deleted++;
+      } else {
+        failures.add(failure);
+      }
+    }
+    _clearSelection();
+    if (!mounted) return;
+    // Re-list so the rows actually disappear; a local delete bypasses every
+    // cache, so there is nothing to invalidate.
+    if (_currentPath == null) {
+      await _loadRoots();
+    } else {
+      await _load(_currentPath!);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failures.isEmpty
+              ? 'Deleted ${deleted == 1 ? '1 item' : '$deleted items'}'
+              : 'Deleted $deleted, failed ${failures.length}',
+        ),
+      ),
+    );
+  }
+
+  /// True when the current selection includes a folder, which makes the
+  /// delete confirmation say so explicitly — a recursive delete of a folder's
+  /// contents must never look like a plain file delete.
+  bool get _containsFolder =>
+      _selected.any((path) => _entries.any((e) => e.path == path && e.isDirectory));
+
   void _grantAccess() {
     _service.openAllFilesAccessSettings();
   }
@@ -303,10 +472,49 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
             ? 'Browse files'
             : (_currentPath?.split('/').lastOrNull ?? 'Files')),
         leading: IconButton(
-          tooltip: 'Up',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _goUp,
+          tooltip: _selectionActive ? 'Cancel selection' : 'Up',
+          icon: Icon(_selectionActive ? Icons.close : Icons.arrow_back),
+          onPressed: _selectionActive ? _clearSelection : _goUp,
         ),
+        actions: [
+          if (_selectionActive) ...[
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Center(
+                child: Text('${_selected.length} selected'),
+              ),
+            ),
+            // The overflow the user asked for: select by long-press, then act
+            // from the three dots.
+            PopupMenuButton<String>(
+              key: ValueKey('fileSelectionMenu'),
+              icon: const Icon(Icons.more_vert),
+              tooltip: 'Selection actions',
+              onSelected: (value) {
+                if (value == 'delete') _confirmDeleteSelection();
+                if (value == 'download') _copySelectionToDownloads();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'download',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.download_outlined),
+                    title: Text('Download to device'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('Delete'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
       body: TvOverscan(child: _body(context)),
     ),
@@ -352,7 +560,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
       for (final entry in _entries)
         _FileTile(
           entry: entry,
-          onTap: () => _openEntry(entry),
+          selected: _selected.contains(entry.path),
+          selectionActive: _selectionActive,
+          onTap: _selectionActive
+              ? () => _toggleSelect(entry)
+              : () => _openEntry(entry),
+          onLongPress: () => _toggleSelect(entry),
           onRemove: _atRoot && entry.bookmarkId != null
               ? () => _removeBookmark(entry)
               : null,
@@ -363,6 +576,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
               _watchedKeys.contains(entry.resumeKey ?? entry.path),
           onToggleWatched:
               entry.isDirectory ? null : () => _toggleWatched(entry),
+          // Same "Download to device" the player offers, per file, so a USB
+          // copy does not need selection mode first.
+          onDownload: _copyOneToDownloads,
           resumeProgress: entry.isDirectory
               ? null
               : ResumeProgressHelper.progressFor(
@@ -374,6 +590,25 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
                 ),
         ),
     ];
+    if (_atRoot) {
+      // Explicit re-scan (issue #48). A USB drive mounted while the app was
+      // already open is picked up on resume, but "I plugged it in and nothing
+      // happened" deserves a button as well as an automatic rescan.
+      items.add(
+        ListTile(
+          leading: const Icon(Icons.refresh),
+          title: const Text('Rescan drives'),
+          subtitle: const Text('Pick up newly connected USB drives'),
+          onTap: () {
+            if (_currentPath == null) {
+              _loadRoots();
+            } else {
+              _load(_currentPath!);
+            }
+          },
+        ),
+      );
+    }
     return ListView.builder(
       itemCount: items.length,
       itemBuilder: (context, index) => items[index],
@@ -391,11 +626,21 @@ class _FileTile extends StatelessWidget {
     this.watched = false,
     this.onToggleWatched,
     this.resumeProgress,
+    this.selected = false,
+    this.selectionActive = false,
+    this.onLongPress,
+    this.onDownload,
   });
 
   final FileEntry entry;
   final VoidCallback onTap;
   final VoidCallback? onRemove;
+  final bool selected;
+  final bool selectionActive;
+  final VoidCallback? onLongPress;
+
+  /// Per-file "Download to device", mirroring the player action.
+  final void Function(FileEntry entry)? onDownload;
   final TmdMeta? tmdbMeta;
   final bool watched;
   final VoidCallback? onToggleWatched;
@@ -434,6 +679,8 @@ class _FileTile extends StatelessWidget {
           ],
         ),
         onTap: onTap,
+        onLongPress: onLongPress,
+        selected: selected,
       );
     }
 
@@ -542,8 +789,8 @@ class _FileTile extends StatelessWidget {
       ),
       title: titleWidget,
       subtitle: subtitleWidget,
-      // Two IconButtons (watch + remove).
-      trailingWidth: 96,
+      // Watch + remove + download.
+      trailingWidth: 144,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -564,9 +811,20 @@ class _FileTile extends StatelessWidget {
               tooltip: 'Remove folder',
               onPressed: onRemove,
             ),
+          if (onDownload != null)
+            IconButton(
+              icon: const Icon(Icons.download_outlined),
+              tooltip: 'Download to device',
+              onPressed: () => onDownload!(entry),
+            ),
         ],
       ),
       onTap: onTap,
+      onLongPress: onLongPress,
+      selected: selected,
+      // The watch toggle is meaningless mid-selection; the row tap and the
+      // overflow do the work then.
+      showTrailingActions: !selectionActive,
     );
   }
 }

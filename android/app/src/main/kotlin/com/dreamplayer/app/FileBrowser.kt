@@ -2,11 +2,13 @@ package com.dreamplayer.app
 
 import android.app.Activity
 import android.content.Context
+import android.os.storage.StorageVolume
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
@@ -91,6 +93,7 @@ class FileBrowser(private val activity: MainActivity) {
                 // are refused: they would each need their own protocol-level
                 // delete, and a mis-fired tap on a NAS share is real data loss.
                 "deleteLocalFile" -> deleteLocalFile(call, result)
+                "copyLocalToDownloads" -> copyLocalToDownloads(call, result)
                 "resolveImportedPath" -> result.success(true)
                 "resolvePath" -> result.success(true)
                 "removeBookmark" -> {
@@ -164,9 +167,20 @@ class FileBrowser(private val activity: MainActivity) {
             }
         } else {
             val f = File(path)
-            // Never delete a directory, and never something outside storage.
+            // Directories are deleted RECURSIVELY (issue #48 follow-up): a
+            // user who selects a folder to delete means the whole tree. The
+            // Dart side confirms before calling, and nothing outside the app's
+            // own storage roots is ever accepted below.
             if (f.isDirectory) {
-                result.error("unsupported", "Only files can be deleted", null)
+                if (!isDeletableTarget(f)) {
+                    result.error("no_permission", "No permission to delete this folder", null)
+                    return
+                }
+                if (!deleteRecursively(f)) {
+                    result.error("delete_failed", "Could not delete the folder", null)
+                    return
+                }
+                result.success(true)
                 return
             }
             if (!Environment.isExternalStorageManager() &&
@@ -186,6 +200,117 @@ class FileBrowser(private val activity: MainActivity) {
             true
         }
         result.success(deleted)
+    }
+
+    /// Copies a local file or folder into the app's download directory.
+    ///
+    /// The browser's "Download to device" action: the picked file is copied
+    /// into `<Downloads>/DreamPlayer/`, which is the same place the network
+    /// downloader writes, so downloaded files all land in one folder.
+    /// Conflicts never overwrite — a suffix is appended, because silently
+    /// clobbering an existing file is worse than a duplicated name.
+    private fun copyLocalToDownloads(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+        if (path.isNullOrEmpty()) {
+            result.error("bad_args", "Missing path", null)
+            return
+        }
+        if (path.startsWith("tree:") ||
+            path.startsWith("smb:") || path.startsWith("ftp:") || path.startsWith("sftp:") ||
+            path.startsWith("http") || path.startsWith("jellyfin:") || path.startsWith("upnp:")
+        ) {
+            result.error("unsupported", "Only local files can be copied", null)
+            return
+        }
+        if (!hasAllFilesAccess()) {
+            result.error(
+                "no_permission",
+                "All Files Access is required to copy files",
+                null
+            )
+            return
+        }
+        val source = File(path)
+        if (!source.exists()) {
+            result.error("not_found", "That file no longer exists", null)
+            return
+        }
+        val base = try {
+            val dir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+            File(dir, "DreamPlayer")
+        } catch (e: Exception) {
+            result.error("copy_failed", e.message ?: "Downloads folder unavailable", null)
+            return
+        }
+        if (!base.exists() && !base.mkdirs()) {
+            result.error("copy_failed", "Could not create the DreamPlayer folder", null)
+            return
+        }
+        try {
+            val destination = uniqueDestination(base, source.name)
+            if (source.isDirectory) {
+                copyTree(source, destination)
+            } else {
+                source.copyTo(destination, overwrite = false)
+            }
+            result.success(destination.absolutePath)
+        } catch (e: Exception) {
+            result.error("copy_failed", e.message ?: "Could not copy the file", null)
+        }
+    }
+
+    /// First free `name` under [dir], appending " (2)", " (3)"… on collision.
+    private fun uniqueDestination(dir: File, name: String): File {
+        var candidate = File(dir, name)
+        if (!candidate.exists()) return candidate
+        val base = name.substringBeforeLast('.', name)
+        val ext = name.substringAfterLast('.', "")
+        var index = 2
+        while (candidate.exists() && index < 1000) {
+            val next = if (ext.isEmpty()) "$base ($index)" else "$base ($index).$ext"
+            candidate = File(dir, next)
+            index++
+        }
+        return candidate
+    }
+
+    private fun copyTree(source: File, destination: File) {
+        if (source.isDirectory) {
+            if (!destination.exists()) destination.mkdirs()
+            source.listFiles()?.forEach { child ->
+                copyTree(child, File(destination, child.name))
+            }
+        } else {
+            source.copyTo(destination, overwrite = true)
+        }
+    }
+
+    /// True when [file] lives under a real external-storage root.
+    ///
+    /// Guards recursive deletion: a bug in the UI must not be able to walk up
+    /// from a bad path and remove something outside storage.
+    private fun isDeletableTarget(file: File): Boolean {
+        val path = try {
+            file.canonicalPath
+        } catch (e: Exception) {
+            file.absolutePath
+        }
+        return listOf(
+            "/storage/",
+            "/sdcard/",
+            Environment.getExternalStorageDirectory()?.absolutePath ?: ""
+        ).any { it.isNotEmpty() && path.startsWith(it) }
+    }
+
+    private fun deleteRecursively(file: File): Boolean {
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { child ->
+                if (!deleteRecursively(child)) return false
+            }
+        }
+        return file.delete()
     }
 
     private fun hasAllFilesAccess(): Boolean =
@@ -227,20 +352,96 @@ class FileBrowser(private val activity: MainActivity) {
 
     // MARK: - Roots
 
+    /// Storage roots shown at the top level: internal, every mounted removable
+    /// volume (USB stick, SD card), then bookmarks.
+    ///
+    /// Issue #48: this used to list `/storage` and skip anything named `usb*`.
+    /// That filter was aimed at the legacy `/storage/usb` FUSE mount, but it is
+    /// also exactly the name a USB volume had on many devices — so plugging in
+    /// a drive showed nothing at all, on a TV especially. The modern mount
+    /// point is `/storage/<VOLUME_UUID>` with no `usb` in the name, and the
+    /// `StorageManager` is the API that actually reports it.
+    ///
+    /// Both are used: `StorageManager` gives the real volumes WITH their
+    /// display names, and the `/storage` scan is kept as a fallback for devices
+    /// where the volume list is empty or unreadable. Duplicates are collapsed,
+    /// so a volume seen by both appears once.
     private fun storageRoots(): List<Map<String, Any?>> {
         val roots = mutableListOf<Map<String, Any?>>()
+        val seen = mutableSetOf<String>()
+
         Environment.getExternalStorageDirectory()?.let { internal ->
             roots.add(rootEntry(internal.absolutePath, "Internal storage"))
+            seen.add(internal.absolutePath)
         }
-        File("/storage").takeIf { it.isDirectory }?.listFiles()?.forEach { vol ->
-            if (vol.isDirectory && vol.name != "emulated" && vol.name != "self" &&
-                !vol.name.startsWith("usb")
-            ) {
-                roots.add(rootEntry(vol.absolutePath, "SD card (${vol.name})"))
+
+        // Primary: volumes the platform actually reports.
+        runCatching {
+            val storageManager =
+                activity.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
+            storageManager?.storageVolumes?.forEach { volume ->
+                val dir = volumeDirectory(volume) ?: return@forEach
+                if (!dir.isDirectory || !seen.add(dir.absolutePath)) return@forEach
+                roots.add(rootEntry(dir.absolutePath, volumeLabel(volume)))
             }
+        }.onFailure {
+            android.util.Log.w("FileBrowser", "storageVolumes unavailable", it)
         }
+
+        // Fallback: /storage scan. Internal storage is named `emulated`; every
+        // other real mount point is a volume. `self` and the legacy `usb`
+        // directory are NOT volumes and are skipped - note that `usb` is also
+        // skipped here only because such a path is the old FUSE mount, whereas
+        // a real USB drive now mounts at /storage/<UUID> and is already
+        // covered by the StorageManager pass above.
+        File("/storage").takeIf { it.isDirectory }?.listFiles()?.forEach { vol ->
+            val name = vol.name
+            if (!vol.isDirectory || name == "emulated" || name == "self" ||
+                name.startsWith("usb") || name == "container"
+            ) {
+                return@forEach
+            }
+            if (!seen.add(vol.absolutePath)) return@forEach
+            roots.add(rootEntry(vol.absolutePath, "SD card ($name)"))
+        }
+
         roots.addAll(bookmarkEntries())
         return roots
+    }
+
+    /// Filesystem directory for a volume, or null when it is not mounted for us.
+    ///
+    /// Only `getDirectory()` is used, and only on API 30+. The deprecated
+    /// `getPath()` was removed in API 31 and does not compile against this
+    /// project's compileSdk 37 at all, so the older-device fallback has to
+    /// come from the `/storage` scan below rather than from a second API here.
+    private fun volumeDirectory(volume: StorageVolume): File? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return try {
+            // Throws when the volume is not mounted for this app.
+            volume.getDirectory()
+        } catch (e: Exception) {
+            android.util.Log.w("FileBrowser", "volume directory unavailable", e)
+            null
+        }
+    }
+
+    /// Display name for a volume: "USB drive", the SD-card name, or just the
+    /// kind when the platform gives no description.
+    private fun volumeLabel(volume: StorageVolume): String {
+        val removable = try {
+            volume.isRemovable
+        } catch (e: Exception) {
+            false
+        }
+        val kind = if (removable) "USB drive" else "SD card"
+        val description = try {
+            @Suppress("DEPRECATION")
+            volume.getDescription(activity)
+        } catch (e: Exception) {
+            null
+        }?.trim().orEmpty()
+        return if (description.isEmpty()) kind else "$kind ($description)"
     }
 
     private fun rootEntry(path: String, name: String): Map<String, Any?> = mapOf(

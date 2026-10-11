@@ -1528,8 +1528,34 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
     if (video == null) return false;
     final src = video.playbackSource;
     // FTP can't be downloaded (Dart HttpClient doesn't support ftp://).
-    // Local files don't need downloading.
-    return src != null && src != PlaybackSource.files && src != PlaybackSource.ftp;
+    if (src == null || src == PlaybackSource.ftp) return false;
+    // A local file normally needs no download — but one on a USB drive or SD
+    // card does: it is on removable storage and invisible to anything reading
+    // the device's own Downloads folder. Copying it into
+    // `<Downloads>/DreamPlayer/` is the same action, through the same
+    // DownloadManager path, with the same progress and notification.
+    if (src == PlaybackSource.files) return _isOnRemovableStorage;
+    return true;
+  }
+
+  /// True when the file lives outside the device's internal storage.
+  ///
+  /// Internal storage mounts at `/storage/emulated/...`; removable volumes get
+  /// a UUID mount point instead (`/storage/1A2B-3C4D/...`). Judging by the
+  /// mount point rather than a flag is deliberate: `Environment.isExternal-
+  /// StorageManager()` says nothing about WHICH volume, and asking Dart for
+  /// that per file would be a round trip for something the path already tells
+  /// us. Unmounted/unknown paths (a SAF `content://` URI) count as NOT
+  /// removable, so the button does not appear for something we cannot copy.
+  bool get _isOnRemovableStorage {
+    final path = widget.video?.path;
+    if (path == null || path.isEmpty) return false;
+    if (path.startsWith('content://') || path.startsWith('tree:')) return false;
+    if (!path.startsWith('/storage/') && !path.startsWith('/sdcard/')) {
+      return false;
+    }
+    return !path.startsWith('/storage/emulated/') &&
+        !path.startsWith('/storage/self/');
   }
 
   bool get _isDownloaded {

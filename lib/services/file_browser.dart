@@ -72,6 +72,37 @@ class FileBrowserService {
         .toList();
   }
 
+  /// Copies a local file or folder into `<Downloads>/DreamPlayer/`.
+  ///
+  /// Returns the destination path, or null on success / a message on failure.
+  /// Mirrors [deleteLocalFile]'s contract so callers handle both the same way.
+  Future<String?> copyLocalToDownloads(String path) async {
+    if (path.isEmpty) return 'Nothing to copy';
+    if (!Platform.isAndroid) return 'Copying is only supported on Android';
+    try {
+      // The native side answers with the DESTINATION PATH (a String), not a
+      // bool. Reading it as <bool> and testing `== true` made every copy report
+      // failure — a silent mismatch that only showed up as a red snackbar.
+      final destination =
+          await _channel.invokeMethod<String>('copyLocalToDownloads', {
+        'path': path,
+      });
+      if (destination == null || destination.isEmpty) {
+        return 'The item could not be copied';
+      }
+      return null;
+    } on PlatformException catch (e) {
+      return switch (e.code) {
+        'no_permission' =>
+          'DreamPlayer needs All Files Access to copy files.',
+        'not_found' => 'That item no longer exists.',
+        _ => e.message ?? 'The item could not be copied.',
+      };
+    } catch (_) {
+      return 'The item could not be copied';
+    }
+  }
+
   /// Directories (first) and video files inside [path].
   /// Why the most recent [listDirectory] came back empty, if it failed.
   ///

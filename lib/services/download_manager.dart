@@ -165,6 +165,18 @@ class DownloadManager extends ChangeNotifier {
     // video.resumeKey = smb:<serverId>/<share>/<file>
     String sourceUri;
     final src = _sourceType(video);
+    if (src == 'local') {
+      // Already on the device (internal storage, SD card, USB drive). Copy it
+      // across with progress instead of handing a local path to the network
+      // downloader, which cannot read one.
+      //
+      // This is what the file browser's "Download to device" now uses, so a
+      // large USB copy gets the same foreground notification, progress bar and
+      // home-screen entry as an SMB download — rather than freezing the UI on a
+      // long synchronous channel call.
+      await _copyLocalFile(video, dir);
+      return;
+    }
     if (src == 'smb') {
       final rk = video.resumeKey ?? '';
       if (rk.startsWith('smb:')) {
@@ -274,7 +286,7 @@ class DownloadManager extends ChangeNotifier {
     final id = _jobId(video);
     final safeName = _safeFileName(video.title);
     final ext = _extension(video.title, video.uri);
-    final destPath = '$dir/$safeName$ext';
+    final destPath = _uniquePath(dir, '$safeName$ext');
     final job = DownloadJob(
       id: id,
       title: video.title,
@@ -541,6 +553,23 @@ class DownloadManager extends ChangeNotifier {
   String _jobId(VideoItem v) {
     final key = v.resumeKey ?? v.path ?? v.uri ?? '';
     return 'dl_${key.hashCode.toRadixString(16)}';
+  }
+
+  /// First free path in [dir] for [name], appending " (2)", " (3)"… .
+  ///
+  /// Copying must never clobber an existing download: the user asked for their
+  /// file to be copied, not for a previous one to be destroyed.
+  String _uniquePath(String dir, String name) {
+    var candidate = '$dir/$name';
+    if (!File(candidate).existsSync()) return candidate;
+    final dot = name.lastIndexOf('.');
+    final base = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+    for (var i = 2; i < 1000; i++) {
+      candidate = '$dir/$base ($i)$ext';
+      if (!File(candidate).existsSync()) return candidate;
+    }
+    return '$dir/$base-$ext';
   }
 
   String _sourceType(VideoItem v) {

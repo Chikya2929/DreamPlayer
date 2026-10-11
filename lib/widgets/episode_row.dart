@@ -205,6 +205,8 @@ class EpisodeRow extends StatelessWidget {
     this.thumbBuilder,
     this.stillUrl,
     this.posterUrl,
+    this.selected = false,
+    this.showTrailingActions = true,
     this.subtitle,
     this.progress,
     this.trailing,
@@ -221,6 +223,17 @@ class EpisodeRow extends StatelessWidget {
   /// A builder, not a widget: the size is only known after layout, and a
   /// widget built by the caller could not be told about it.
   final Widget Function(EpisodeThumbSize size)? thumbBuilder;
+
+  /// Selected state, for multi-select (long-press then act).
+  ///
+  /// Painted as a tinted background plus a leading check, because a border
+  /// alone is invisible against the dark surfaces these rows sit on.
+  final bool selected;
+
+  /// Whether [trailing] is shown. Suppressed while a selection is active so
+  /// the row tap and the overflow are the only targets, and a stray tap on a
+  /// watch toggle cannot slip through mid-selection.
+  final bool showTrailingActions;
 
   /// The episode's own still, used by the DEFAULT thumbnail.
   ///
@@ -397,7 +410,11 @@ class EpisodeRow extends StatelessWidget {
           onTap: enabled ? onTap : null,
           onLongPress: enabled ? onLongPress : null,
           child: Material(
-            color: Colors.transparent,
+            // A tinted fill, not just a border: these rows sit on a dark
+            // surface where an outline alone is easy to miss.
+            color: selected
+                ? theme.colorScheme.primary.withValues(alpha: 0.18)
+                : Colors.transparent,
             child: InkWell(
               onTap: enabled ? onTap : null,
               onLongPress: enabled ? onLongPress : null,
@@ -414,7 +431,7 @@ class EpisodeRow extends StatelessWidget {
                       thumb,
                       const SizedBox(width: gap),
                       Expanded(child: text),
-                      if (trailing != null) ...[
+                      if (trailing != null && showTrailingActions) ...[
                         const SizedBox(width: trailingGap),
                         trailing!,
                       ],
