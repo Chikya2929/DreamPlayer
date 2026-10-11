@@ -362,16 +362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Returns true if a gated Settings feature is allowed, or shows the paywall.
   /// Mirrors `PlayerScreen._gate` — Android is always advanced, so this is a
   /// guaranteed no-op there (iOS-only monetization).
-  Future<bool> _settingsGate() async {
-    final gate = checkGate(
-      gateEnabled: true,
-      advanced: Entitlements.instance.isEntitled,
-      paywallActive: Entitlements.instance.effectivePaywallEnabled,
-    );
-    if (gate != GateResult.paywallNeeded) return true;
-    final purchased = await showPaywall(context);
-    return purchased;
-  }
+  Future<bool> _settingsGate() => settingsGate(context);
 
   Future<void> _loadTmdbKey() async {
     // Read only the user's SAVED key from prefs — NOT effectiveApiKey(),
@@ -2147,6 +2138,23 @@ class _FaqTile extends StatelessWidget {
   }
 }
 
+/// Shared Pro gate for Settings rows.
+///
+/// Top level because the gated rows are NOT all in this State's build method:
+/// the Appearance block lives in [_LayoutSection], a separate StatelessWidget.
+/// Duplicating the check there would be exactly the kind of second copy that
+/// drifts — and `Entitlements.advanced` being the single chokepoint is what
+/// keeps Android free, so there must not be a second one.
+Future<bool> settingsGate(BuildContext context) async {
+  final gate = checkGate(
+    gateEnabled: true,
+    advanced: Entitlements.instance.isEntitled,
+    paywallActive: Entitlements.instance.effectivePaywallEnabled,
+  );
+  if (gate != GateResult.paywallNeeded) return true;
+  return await showPaywall(context);
+}
+
 /// Library layout preferences (issue #34, item 6): how dense the home grids
 /// are, and how many cards per row.
 class _LayoutSection extends StatelessWidget {
@@ -2421,10 +2429,21 @@ class _LayoutSection extends StatelessWidget {
                   ),
                   onTap: () => _pickAccent(context),
                 ),
-                // Launcher icon (issue #23). Android-only in practice: the
-                // toggle needs an activity-alias, and TV has no launcher.
-                if (defaultTargetPlatform != TargetPlatform.iOS &&
-                    !isTvMode(context))
+                // Launcher icon (issue #23). TV has no launcher, so it is the
+                // only platform excluded. iOS uses `setAlternateIconName`,
+                // which is first-class there and needs no activity-alias.
+                //
+                // Gated as an ADDITIVE of the existing Pro unlock (which is
+                // already anchored on Dolby Vision / HDR), NOT as a standalone
+                // cosmetic paywall — a reviewer's first reaction to "pay to
+                // change your icon" is a 2.3.x flag. Bundled, the cosmetics
+                // ride along with a real feature instead of standing alone.
+                //
+                // Nothing new is sold: the gate reads the same `advanced`
+                // boolean as every other one, so existing subscribers already
+                // have it and get this immediately. Android is untouched —
+                // `Entitlements.advanced` is unconditionally true there.
+                if (!isTvMode(context))
                   ListenableBuilder(
                     listenable: AppIconService.instance,
                     builder: (context, _) {
@@ -2432,9 +2451,17 @@ class _LayoutSection extends StatelessWidget {
                       return TvTile(
                         leading: const Icon(Icons.apps),
                         title: const Text('App icon'),
-                        subtitle: Text(style.description),
+                        subtitle: Text(
+                          Entitlements.instance.isEntitled
+                              ? style.description
+                              : 'Included with Pro',
+                        ),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _pickAppIcon(context),
+                        onTap: () async {
+                          if (!await settingsGate(context)) return;
+                          if (!context.mounted) return;
+                          await _pickAppIcon(context);
+                        },
                       );
                     },
                   ),
