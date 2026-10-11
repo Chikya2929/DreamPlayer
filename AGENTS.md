@@ -52,6 +52,64 @@ A video player app supporting:
   `E01`/`[01]` retain fallback behavior. Komi-san canonicalizes to TMDB's
   `Komi Can't Communicate`, restoring poster + episode stills. GuP Finale 01–04
   stay four independent movie cards and retain their existing TMDB part matches.
+- **Adult metadata + external providers (issue #46, 2026-10-11)**:
+  - **Adult content is ONE parameter.** `tmdb_client.dart` had a hardcoded
+    `'include_adult': 'false'` — the only such site in the codebase. Nothing
+    else filters adult results, so with it false TMDB never returns an adult
+    title and the file resolves to no match. Measured live: `query=hentai`
+    returns 20 results of which **0** are adult with it off, **4** with it on.
+    Settings → Metadata → "Include adult content" (default off) flips it;
+    `TmdApi.search(includeAdult:)` overrides it per call so tests need no
+    global state. Do NOT add a client-side adult filter — that would be a second
+    place to keep in sync for no benefit.
+  - **Providers are now an adapter seam** (`lib/services/metadata_provider.dart`
+    → `metadata_provider_adapter.dart`). TheTVDB was added by teaching
+    `TmdMovie`/`MetadataProvider` about it; an *arbitrary* third-party service
+    has its own response schema, so the seam is `MetadataProviderAdapter` +
+    `MetadataProviderRegistry`. An unconfigured adapter is skipped by
+    `configured()` rather than firing a failed request per lookup.
+    `MetadataProvider.external` gets its own provider-qualified cache key, so an
+    external id cannot collide with the same TMDB id.
+  - **`MetadataProviderChoice.external` is PRIMARY, not a fallback.** TheTVDB's
+    fallback switch is re-pointed at it in that mode, because TMDB is no longer
+    the resolver. `providerOrderFor(externalConfigured: false)` deliberately
+    falls back to the built-ins rather than resolving nothing.
+  - **The Settings "External" cell is hidden until an adapter registers** — the
+    `MetadataProviderRegistry.instance.register(AvdbAdapter.instance)` call is
+    in `main()`. Offering a choice that resolves nothing is worse than not
+    offering it, and the existing test `providerOrderFor` covers the
+    unconfigured case as defence in depth.
+  - **AVDb (`lib/services/avdb_adapter.dart`)** — verified live before writing:
+    `avdbapi.com` LOOKS dead (the bare domain serves an ISP redirect page) and
+    resolves **IPv6-only**; forcing IPv4 works. It is free, needs **no key**, and
+    speaks the Maccms `provide/vod` shape. **Its two endpoints are not uniform:**
+    `ac=list` returns NO `poster_url`/`thumb_url`/`description`, while
+    `ac=detail&wd=` returns everything — so `search()` fetches a DETAIL
+    response. A list query returns titles with nothing else and every row renders
+    bare. Movie-only (TV returns empty rather than inventing seasons) and **no
+    ratings**, so `voteAverage` stays 0 and rows show no star rather than a
+    fake score. `time` is a DURATION (`"01:58:34"`); the release date is
+    `created_at`/`vod_pubdate`. Reading one as the other is a wrong runtime.
+  - **`AvdbAdapter` is a SINGLETON (`AvdbAdapter.instance`)** because the
+    enabled flag is cached. Settings used to build a fresh instance per call
+    while the registry held its own, so toggling wrote the preference but the
+    registered adapter reported the old value for the rest of the session — the
+    provider stayed invisible. `test/avdb_adapter_test.dart` reproduces that.
+- **Episode rows fall back to the show poster when there is no still (issue
+  #47, 2026-10-11)**: `EpisodeStillThumb` already fell back to `posterUrl`, but
+  **`folder_screen`, `series_seasons_screen` and `smb_screen` never passed one**,
+  so a row with no still rendered a bare icon — which reads as "the thumbnail
+  failed to load". The reported examples both had NO still to show: a
+  movie-part folder (no episode ⇒ no still, and "Strike the Blood Final" has no
+  TheTVDB record at all) and a new 2026 title with 1 still in 6. TheTVDB itself
+  is fine — measured 100% per-episode still coverage on Demon Slayer (79/79),
+  Fullmetal Alchemist (86/86), Steins;Gate (31/31) and Strike the Blood (61/61).
+  **The contract now lives in `EpisodeRow`** (`stillUrl` + `posterUrl` fields and
+  a default thumbnail) because seven duplicated call sites is how three of them
+  drifted; `thumbBuilder` still overrides. The layout tests assert each label's
+  **RENDERED width against its intrinsic width** — `takeException()` alone does
+  NOT catch this, because a squeezed `SegmentedButton` clips silently rather
+  than overflowing, which is exactly what cut off "TheTVDB".
 - **Optional TheTVDB metadata provider (2026-09-24, 0.4.9+36)**: TMDB remains
   the primary provider; TheTVDB v4 can be configured in Settings as a fallback
   when TMDB has no confident match, or selected explicitly from Fix Match/Group
@@ -580,6 +638,35 @@ A video player app supporting:
 - **Player overlay** shows HDR format + video/audio codec + resolution chips; library cards show an HDR badge + audio codec label.
   - **DV dedup**: for Dolby Vision the purple HDR chip already says "Dolby Vision", so the redundant video-codec chip is suppressed (no "Dolby Vision" twice).
   - **Chip layout**: landscape puts back button + title + chips in one `Wrap` on the same row; portrait shows title row, then chips `Wrap` below.
+### Settings → Metadata: one decision, not three rows
+
+The provider selector sits **at the top** and is drawn as **one outlined box
+divided into three equal cells**, and only the selected provider's credential
+field appears beneath it. "Use TheTVDB as fallback" appears only while TMDB is
+the resolver, because TheTVDB is a fallback *for TMDB*.
+
+Both earlier shapes failed the same requirement — three options that read as
+ONE control:
+
+- **`SegmentedButton`** lays segments out in a single non-wrapping row and
+  **clips** when they do not fit. "TheTVDB" was cut off even at 390 dp. A
+  `takeException()` check does **not** catch this: a squeezed SegmentedButton
+  clips silently rather than overflowing, so the layout tests assert each label's
+  **rendered width against its intrinsic width** instead, pinned to 411 dp (the
+  reporter's own width) as well as 390 dp, 320 dp and 2.0x text scale.
+- **A `Wrap` of `ChoiceChip`s** staggers the chips to their own widths and then
+  breaks the third onto a second line. Removing the checkmark (the selected fill
+  is enough, and it reserves ~24 dp) helps but does not fix the stagger.
+
+`Row` + `Expanded` cells inside a clipped bordered box is equal-by-construction
+and cannot wrap. Labels sit in a `FittedBox(scaleDown)` so a large text scale
+shrinks the word rather than clipping it.
+
+Prose under each setting was also cut to short labels; the three-paragraph
+TMDB/TheTVDB intro is gone. `settingsCacheClearedDesc` is deliberately NOT
+trimmed — it is the post-clear confirmation snackbar, not a subtitle (a test
+caught that).
+
 ### App icon switching (issue #23) — the alias rule that bricks the app
 
 Settings → Appearance → App icon switches between five launcher icons (default,
@@ -856,7 +943,16 @@ nothing here; every VobSub entry in the release notes is a container-track fix.
 file's own canvas rather than the video — so a 1920x1080 VobSub on a 3840x2160 4K
 video drew at 2x and covered half the picture. It is now `no`.
    - **OpenSubtitles online search (2026-08)**: CC sheet → "Search online subtitles…" (`lib/screens/opensubtitles_sheet.dart` + `lib/services/opensubtitles_client.dart`) via `api.opensubtitles.com` REST. Search `GET /api/v1/subtitles?query=&languages=&moviehash=` (hash = OpenSubtitles 64-bit first+last 64 KiB via `opensubtitlesHashForFile` when local path available, ordered by `download_count` desc). Download `POST /api/v1/download {file_id}` with `Api-Key` alone = **5/day/IP anonymous**, plus `Authorization: Bearer <JWT>` after `POST /login` = **20/day free** (VIP more); `403` quota → login dialog then retry. Link fetched via `fetchBytes` (retry on `SocketException` RST with `persistentConnection=false`, `c6f616c`), saved persistently to `getApplicationSupportDirectory()/opensubs/<resumeKey>/<fileName>` via `DownloadedSubtitlesStore` (`dreamplayer.downloadedSubs` JSON) and applied mid-playback by copying `_current` with `subtitleUri` and `await _reopenAt(pos)`. Downloaded section appears **at top of CC sheet before embedded tracks** (Nova-style) per-video, re-selectable without re-downloading. Settings → Subtitles → **OpenSubtitles** tile shows login state / remaining downloads and handles sign-in/out (token `dreamplayer.opensubtitlesToken` persisted 23h). Key via `--dart-define=OPENSUBTITLES_API_KEY` (`lib/config/opensubtitles_api_key.dart`, gitignored `.env` like TMDB).
-- **File browser (CX-Explorer style)** (`lib/screens/file_browser_screen.dart`): browse storage in-app and play any video without importing. **Back goes up one folder at a time** — only a folder whose path IS a root returns to the roots list; any other folder loads its parent (even when the parent is itself a root), so back from a folder inside a root lands on that root's contents, not on "Browse files". Reached from the home **+** button → "Internal storage" (the root list no longer shows a "Pick a folder" tile — adding folders lives on the home **+** menu's "Add folder to library"). Android side (`android/.../FileBrowser.kt`, channel `dreamplayer/files`): `hasAllFilesAccess` / `openAllFilesAccessSettings` / `getStorageRoots` (internal + SD card) / `listDirectory` (folders then video files, sorted, with sizes) / `pickFolder` (launches `ACTION_OPEN_DOCUMENT_TREE`, persistable URI grants stored in SharedPreferences as `dreamplayer.folderBookmarks`, result delivered via `MainActivity.onActivityResult` → `FileBrowser.onFolderPicked`) / `pickLibraryFolder` (same picker, but stores the tree under a library-only `libfolder.<uuid>` key so it never becomes a file-browser root) / `removeBookmark` / `removeLibraryBookmark`. Bookmarked trees are appended to `getStorageRoots` with a `bookmarkId` and are listed through `DocumentFile` via synthetic paths `tree:<id>` / `tree:<id>/<relative>` (directory entries keep the synthetic path for back-navigation; video entries carry their `content://` document URI so `file_browser_screen.dart` passes it as `VideoItem.uri`, like the "Open with" flow). Requires **`MANAGE_EXTERNAL_STORAGE`** (All Files Access) on Android 11+ — the screen shows a "Grant access" button that opens the system settings and re-checks on app resume (the folder picker works without it, but browsing does not). iOS side (`ios/Runner/FileBrowser.swift`): sandboxed, so the root list is a virtual **"Files"** entry (`isFilesHome: true`, synthetic path `dreamplayer/files-home`) that opens the **system document picker** — the real Files-app home (iCloud Drive, On My iPad, Downloads, other providers); picking a video imports it (`importFile` → bookmark stored in `dreamplayer.importedVideos`, re-granted later via `resolveImportedPath`) and plays it. Below it: the app's Documents folder plus **bookmarked folders picked via the system document picker** (`pickFolder` → `UIDocumentPickerViewController` for `.folder`, `removeBookmark`) — security-scoped bookmarks stored in UserDefaults keep picked folders (iCloud Drive, On My iPad, other providers) readable across launches, so videos outside the sandbox are browsed/played in-app without touching the Files app. The Dart screen shows a "Pick a folder" tile + per-bookmark remove at the root on **both** platforms (subtitle text is platform-specific). Tapping a video builds a `VideoItem` and pushes `PlayerScreen`. Verified on-device (Android): Internal storage → Download → video → Dolby Vision People plays with live HDR/codec chips.
+- **File browser (CX-Explorer style)** (`lib/screens/file_browser_screen.dart`): browse storage in-app and play any video without importing. **Back goes up one folder at a time** — only a folder whose path IS a root returns to the roots list; any other folder loads its parent (even when the parent is itself a root), so back from a folder inside a root lands on that root's contents, not on "Browse files". Reached from the home **+** button → "Internal storage" (the root list no longer shows a "Pick a folder" tile — adding folders lives on the home **+** menu's "Add folder to library"). Android side (`android/.../FileBrowser.kt`, channel `dreamplayer/files`): `hasAllFilesAccess` / `openAllFilesAccessSettings` / `getStorageRoots` (internal + removable volumes, see below) / `listDirectory` (folders then video files, sorted, with sizes) / `pickFolder` (launches `ACTION_OPEN_DOCUMENT_TREE`, persistable URI grants stored in SharedPreferences as `dreamplayer.folderBookmarks`, result delivered via `MainActivity.onActivityResult` → `FileBrowser.onFolderPicked`) / `pickLibraryFolder` (same picker, but stores the tree under a library-only `libfolder.<uuid>` key so it never becomes a file-browser root) / `removeBookmark` / `removeLibraryBookmark`. Bookmarked trees are appended to `getStorageRoots` with a `bookmarkId` and are listed through `DocumentFile` via synthetic paths `tree:<id>` / `tree:<id>/<relative>` (directory entries keep the synthetic path for back-navigation; video entries carry their `content://` document URI so `file_browser_screen.dart` passes it as `VideoItem.uri`, like the "Open with" flow). Requires **`MANAGE_EXTERNAL_STORAGE`** (All Files Access) on Android 11+ — the screen shows a "Grant access" button that opens the system settings and re-checks on app resume (the folder picker works without it, but browsing does not). iOS side (`ios/Runner/FileBrowser.swift`): sandboxed, so the root list is a virtual **"Files"** entry (`isFilesHome: true`, synthetic path `dreamplayer/files-home`) that opens the **system document picker** — the real Files-app home (iCloud Drive, On My iPad, Downloads, other providers); picking a video imports it (`importFile` → bookmark stored in `dreamplayer.importedVideos`, re-granted later via `resolveImportedPath`) and plays it. Below it: the app's Documents folder plus **bookmarked folders picked via the system document picker** (`pickFolder` → `UIDocumentPickerViewController` for `.folder`, `removeBookmark`) — security-scoped bookmarks stored in UserDefaults keep picked folders (iCloud Drive, On My iPad, other providers) readable across launches, so videos outside the sandbox are browsed/played in-app without touching the Files app. The Dart screen shows a "Pick a folder" tile + per-bookmark remove at the root on **both** platforms (subtitle text is platform-specific). Tapping a video builds a `VideoItem` and pushes `PlayerScreen`. Verified on-device (Android): Internal storage → Download → video → Dolby Vision People plays with live HDR/codec chips.
+
+- **USB drives, multi-select delete, download to device (issue #48, 2026-10-11)** — read this before touching `FileBrowser.kt` or the file-browser screen; three separate bugs live here and none of them reproduce on a device without a drive attached.
+  - **USB drives were invisible.** `storageRoots()` scanned `/storage` and skipped any entry whose name started with `usb`. That filter was meant for the legacy `/storage/usb` FUSE mount — but that is ALSO the name many USB volumes actually get, so a plugged-in drive showed nothing at all (worst on TV). Modern USB mounts at `/storage/<VOLUME_UUID>`, and `StorageManager` is the API that reports it. Volumes now come from `storageVolumes` first (labelled `USB drive (name)` / `SD card (name)`), with the `/storage` scan kept as a fallback and paths deduped.
+  - **Two compile traps in that code, both hit for real:** `StorageVolume.getPath()` was **removed in API 31** and does not compile against `compileSdk = 37`, and there is no pre-30 counterpart to pair it with — the `/storage` scan is the only older-device path, so do not reintroduce `getPath()`. `getDirectory()` returns a **non-null `File`**, not `File?`, and is API 30+. Check the real signature with `javap -cp /opt/android-sdk/platforms/android-37.0/android.jar android.os.storage.StorageVolume` rather than guessing.
+  - **Rescan.** `didChangeAppLifecycleState` used to re-run `_init()` **only when All Files Access was missing**, so a user who already had access kept the root list computed before the drive was plugged in. It now re-scans on **every** resume (and re-lists inside a folder), plus a **Rescan drives** row at the root.
+  - **Long-press select → ⋮ → Delete.** `_selected` is keyed by PATH, not index, so it survives the rescan. Folders are selectable and deleted **recursively**, guarded twice because this is the most destructive thing in the app: native `isDeletableTarget()` only proceeds when the canonical path is under `/storage`, `/sdcard` or external storage, and the confirmation switches to *"INCLUDING the contents of any folder"* when a folder is in the selection. Network and synthetic `tree:` paths are refused natively too.
+  - **Download to device** copies into `<Downloads>/DreamPlayer/` — the same folder the network downloader writes to — by routing `PlaybackSource.files` to `DownloadManager._copyLocalFile`, which already did a **chunked 256 KB async copy with progress**. That single line of routing IS the feature: the notification progress bar, the home hamburger list and cancel all come from `DownloadManager` for free. **Never copy on the platform thread** — an earlier version called the channel directly and froze the app on a large file. Copies never overwrite (`_uniquePath` → `name (2).mkv`). Folders are **skipped**: a recursive copy is not one transfer, and as a job it would report a size it does not know and could not be cancelled.
+  - **The native `copyLocalToDownloads` answers with the destination PATH, not a bool.** Reading it as `invokeMethod<bool>` and testing `== true` made every copy report failure — a red snackbar for a copy that had actually succeeded. Check the return type whenever a channel method is added; a silently wrong one produces a plausible-looking failure.
+  - **`tmd_details_screen`'s "Download to device" is gated on `_isNetworkSource`**, which excluded local files because "local files don't need downloading" — true for internal storage, false for a USB drive. It now checks the **mount point**: `/storage/emulated/` and `/storage/self/` stay hidden, any other `/storage/` volume shows it. Path rather than `Environment` flags, because those say nothing about *which* volume; `content://` / `tree:` count as not removable so the button never appears for something that cannot be copied.
 - **"Open with" / file-explorer integration** (`AndroidManifest.xml` `ACTION_VIEW` intent-filters for `content`/`file` schemes + video MIME types incl. `video/*`, matroska, mpeg, ts, avi, wmv, octet-stream): tapping a video anywhere on the device now offers DreamPlayer. `MainActivity` resolves the intent (file path or `content://` URI + display name via `OpenableColumns`) and forwards it over the `dreamplayer/intent` channel (`getInitialIntent` on launch / `open` on `onNewIntent`); `lib/services/open_intent.dart` turns it into a `VideoItem` and pushes `PlayerScreen` via a global `appNavigatorKey` in `lib/app.dart`. `VideoItem` gained an optional `uri` (content URIs) with `path` now nullable; `ExoPlayerView` opens a raw URI when no path is available. Verified on-device: "Open with" chooser lists DreamPlayer and launches Dolby Vision playback.
   - **CX Explorer network-stream handoff**: CX hands SMB videos to players as `http://127.0.0.1:<port>/SMB/...` (its own local HTTP proxy), so the intent filter additionally declares `http`/`https`/empty schemes (`<data android:scheme=""/>`) + the full container-MIME matrix (`video/x-matroska`, `application/octet-stream`, `application/mpeg`, ... — a single filter, since per-vendor MIMEs differ), and `android:usesCleartextTraffic="true"`. Media3's `DefaultDataSource` handles file/content/asset itself and sends every other scheme (http/https) to the base factory, so `ExoPlayerView.kt` wires `DefaultHttpDataSource.Factory()` as that base — CX's proxy streams arrive there with no fallback and no extra code. Verified on-device via logcat: 4K HEVC lossless (3840×2176@60) streamed through CX's proxy decoded at a steady 60 fps / **0 discarded frames** for a full session (`c2.qti.hevc.decoder` telemetry), only jank = the app's cold start.
 - **Home/settings status bar**: `RootShell` maps `MediaQuery.viewPadding.top` into `padding` (Android edge-to-edge reports `padding.top == 0`), so `SliverAppBar` never overlaps the status bar.
@@ -2326,6 +2422,9 @@ lib/
   services/continue_watching.dart # continue-watching list (shared_preferences JSON)
   services/watched_store.dart     # watched marks (prefs dreamplayer.watched, StringList of resume keys, auto on ended + manual toggle)
   services/jellyfin_client.dart     # Jellyfin/Emby REST + mDNS discovery + JellyfinServer/JellyfinItem/JellyfinItemInfo models + videoItem/serverForUrl/getItemInfo helpers + folder-meta cache + VideoChapter from Item.Chapters
+  services/adult_content_store.dart  # include_adult toggle (issue #46), persisted, default off
+  services/metadata_provider_adapter.dart # MetadataProviderAdapter + registry: pluggable 3rd providers
+  services/avdb_adapter.dart          # AVDb (avdbapi.com) as the first adapter; no key, movie-only
   services/tmdb_client.dart        # TMDB: filename parser (ParsedFileName), TmdApi (search/details/bestForQuery), TmdStore cache, TmdService facade
   services/the_tvdb_client.dart    # optional TheTVDB v4 client, provider mapping, pagination, and secure credential channel
   services/library_folders.dart    # user-added library folders (LibraryFolder model + LibraryFoldersStore, prefs dreamplayer.libraryFolders; LibraryFolderSource.files|jellyfin|smb|webdav|ftp|upnp)
@@ -2429,6 +2528,10 @@ test/
   details_header_poster_test.dart   # an explicit poster pick beats the season poster
   chapter_nav_test.dart           # issue #40 chapter jump: grace window, null-at-end (no wrap), duplicate starts
   app_debug_log_test.dart         # Dart-side log is inert under flutter_test and never throws
+  avdb_adapter_test.dart             # AVDb maps the Maccms shape; duration vs date; singleton staleness
+  metadata_adult_and_external_test.dart # include_adult wire param; external provider ordering; registry
+  file_browser_selection_test.dart   # long-press select -> three dots -> delete, folder warning, download
+  settings_metadata_provider_layout_test.dart # three equal cells never clip (411dp = reporter's width)
   tmd_store_persist_test.dart      # TmdStore writes coalesce; nothing lost mid-write (iOS freeze fix)
   local_library_rescan_test.dart   # issue #39 rescan: id preservation, add-only fallback, root reconstruction, applyDiff ordering
   episode_label_test.dart         # offline episode title fallbacks (TMDB name -> S01E05 -> file name)

@@ -151,10 +151,11 @@ Each thumbnail is linked — click any image to open it full size.
 - **Manual grouping** — select cards (long-press) → Group → one grouped card with the name you choose; TV series still auto-group by name
 - **Bookmark network folders to Home** — pin SMB and WebDAV folders straight from their browsers, with a colored source badge (Jellyfin/FTP/DLNA are browse-only via `+` menu)
 - **Season auto-expand** — bookmarking a show expands each season into its own card (`House Season02`, `House Season03`); group manually if you want one card
-- **Download to device** — download network videos for offline playback (SMB, WebDAV, HTTP, Jellyfin, UPnP)
+- **Download to device** — download network videos for offline playback (SMB, WebDAV, HTTP, Jellyfin, UPnP), or copy a file off a USB drive or SD card; progress lives in the notification panel and the list is in the home screen's hamburger menu
 - **Downloaded files in home grid** — completed downloads appear with a checkmark badge, tap to play
 - **SIMKL watched sync** — free unlimited watch-history sync (`simkl.com`); auto-pushes finished videos and syncs watched state across devices
-- **File browser** — browse device storage and play any video without importing
+- **File browser** — browse device storage and play any video without importing. USB drives and SD cards appear as volumes ("USB drive (name)"), and the list re-scans whenever you return to the screen or tap **Rescan drives**
+- **Multi-select delete** — long-press files or folders to select, then ⋮ → Delete. Folders are deleted recursively, with the confirmation spelling that out
 
 ### Localization
 - **English, Spanish, Chinese Simplified, Russian** — 504 translated strings across all 13 screens
@@ -168,6 +169,7 @@ Each thumbnail is linked — click any image to open it full size.
 - "Fix match" to correct a wrong auto-match
 - **Grouped screens get the full header** — backdrop hero, overview, rating, genres, cast, trailers, then the poster cards
 - **Player top bar** shows the TMDB title (falls back to the file name)
+- **Rows fall back to the poster** when an episode has no still of its own, so a missing still never reads as a broken thumbnail
 
 ### Player Controls
 - Play/pause, seek, ±10s, fullscreen, auto-hiding UI
@@ -254,11 +256,26 @@ PIN are stored in Android Keystore-backed storage or the iOS Keychain; legacy
 values are migrated at startup, and Android excludes the legacy Dart preferences
 file from backup. SIMKL synchronization continues to use TMDB IDs only.
 
-TheTVDB artwork and episode data remain subject to TheTVDB's API terms and
+Provider artwork and episode data remain subject to each provider's terms and
 attribution requirements. See [TheTVDB](https://thetvdb.com/) for details. This
-product uses the TheTVDB API but is not endorsed by TheTVDB. TheTVDB is
-currently the supported external provider; adult-content providers such as AVDB
-are intentionally not enabled.
+product uses the TheTVDB API but is not endorsed by TheTVDB.
+
+AVDb is also available as a third provider, behind **Settings → Metadata → AVDb**.
+It is free, needs no API key, and covers adult titles that neither TMDB nor
+TheTVDB carry well. It is deliberately limited to movies: it has no season data
+and no ratings, so an episode never resolves through it and rows show no star
+rather than an invented score. Selecting a provider there shows only that
+provider's credential field, with TheTVDB offered as an optional fallback.
+
+Third parties can add a provider through the `MetadataProviderAdapter` seam
+(`lib/services/metadata_provider_adapter.dart`) instead of being taught to
+`TmdMovie` and the cache one at a time.
+
+**Adult content** is off by default. Settings → Metadata → *Include adult
+content* is the only switch: TMDB is asked `include_adult=false` everywhere
+until you turn it on, so adult titles resolve to no match at all while it is off.
+It affects TMDB metadata matching only and changes nothing about what the app
+will play.
 
 ### Android TV / Fire TV
 - Full 10-foot UI with D-pad navigation and custom focus highlights

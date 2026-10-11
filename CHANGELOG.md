@@ -7,12 +7,72 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **External USB drives and SD cards now appear in the file browser
+  (issue #48).** The browser scanned `/storage` and skipped any entry named
+  `usb*`, a filter meant for the legacy `/storage/usb` FUSE mount — but that is
+  also the name some USB volumes actually get, so a plugged-in drive was simply
+  invisible. Volumes now come from `StorageManager` and are labelled
+  "USB drive (name)" / "SD card (name)". The root list also re-scans whenever you
+  return to the screen (it previously only refreshed when All Files Access was
+  *missing*), and there is a **Rescan drives** row.
+
+- **Delete files and folders from the browser.** Long-press to select, tap more
+  to add, then **⋮** in the app bar → Delete. Folders are deleted recursively,
+  guarded twice: a recursive delete only proceeds when the canonical path is
+  genuinely under device storage, and the confirmation switches to *"INCLUDING
+  the contents of any folder"* whenever a folder is in the selection. Network
+  paths are refused.
+
+- **Download to device from the file browser.** Every video row has its own
+  download button, and long-press → ⋮ offers it for the whole selection. Files
+  are copied into `<Downloads>/DreamPlayer/` — the same folder the network
+  downloader uses — with the same foreground-notification progress bar, home
+  screen entry and cancel as an SMB download. Copies never overwrite: a
+  collision becomes `name (2).mkv`. The details screen now offers the action for
+  files on a USB drive or SD card; internal storage still does not, because
+  there is nothing to copy from it.
+
+- **Adult content metadata (issue #46).** Settings → Metadata → **Include adult
+  content**, off by default. TMDB was asked `include_adult=false` at the one
+  place that gates it, so an adult title resolved to no match at all — measured
+  live, `query=hentai` returns 0 adult results with it off and 4 with it on.
+
+- **AVDb as a metadata provider (issue #46).** `avdbapi.com` is a free,
+  key-less adult catalogue speaking the Maccms `provide/vod` shape. It is
+  reached through a new pluggable `MetadataProviderAdapter` seam, so a third
+  provider no longer means teaching the whole app about another schema. AVDb is
+  movie-only and carries no ratings, so it never produces a star rating rather
+  than a fake one. Note that its homepage looks dead (an ISP redirect page) and
+  resolves IPv6-only; forcing IPv4 works.
+
 - **Choose the app icon (issue #23).** Settings → Appearance → **App icon** now
   offers five launcher icons: the original logo + wordmark, the logo on its own,
   and the logo recoloured red, green or cyan. The logo-only option exists
   because Android already prints the app name under the icon, so the wordmark is
   redundant there. Works on Android and iPhone/iPad; hidden on TV, which has no
   launcher.
+
+### Changed
+
+- **Settings → Metadata is now a single decision.** The provider selector moved
+  to the top of the section and is drawn as one outlined box divided into three
+  equal cells, and only the selected provider's credential field is shown
+  beneath it. The "Use TheTVDB as fallback" switch now appears only while TMDB
+  is the resolver, since TheTVDB is a fallback *for TMDB*. Long explanatory
+  paragraphs under each setting were replaced with short labels.
+
+- **Episode rows fall back to the show poster when an episode has no still
+  (issue #47).** Previously those rows rendered a bare placeholder, which read
+  as "the thumbnail failed to load" — the image pipeline was never the problem.
+  The rule now lives in `EpisodeRow` rather than being repeated across seven
+  browse screens.
+
+### Fixed
+
+- **Metadata provider selector could clip or wrap.** "TheTVDB" did not fit as a
+  `SegmentedButton` segment on a narrow phone, and a row of separate chips
+  staggered to their own widths and pushed AVDb onto a second line. Three equal
+  cells in one box cannot do either.
 
 ## 0.5.2
 
