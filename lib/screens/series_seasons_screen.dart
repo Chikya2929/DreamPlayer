@@ -72,6 +72,19 @@ class _SeriesSeasonsScreenState extends State<SeriesSeasonsScreen> {
   /// because they live in the show-level season data.
   String get _showMetadataKey => widget.group.primary.metadataKey;
 
+  /// The show's poster, handed to every row as the fallback when an episode
+  /// has no still of its own (issue #47). Resolved once per build from the
+  /// same meta the header already reads.
+  String? get _seriesPosterUrl {
+    final meta = TmdService.instance.metaFor(
+      _showMetadataKey,
+      inheritArtworkFrom: [
+        if (_groupKey != _showMetadataKey) _groupKey,
+      ],
+    );
+    return posterUrlOf(meta);
+  }
+
   static const _hiddenSeasonsPrefKey = 'dreamplayer.hiddenSeriesSeasons';
 
   /// The metadata key of the season-folder that owns [season], or null.
@@ -1212,6 +1225,7 @@ class _SeriesSeasonsScreenState extends State<SeriesSeasonsScreen> {
                       // show key (single-folder / unseasoned layouts).
                       dataKey: _folderKeyForSeason(s) ?? _showMetadataKey,
                       episode: _episodeFor(entry),
+                      posterUrl: _seriesPosterUrl,
                       onTap: () => _openEntry(entry),
                       onToggleWatched: () => _toggleWatched(entry),
                     ),
@@ -1276,6 +1290,7 @@ class _SeriesSeasonsScreenState extends State<SeriesSeasonsScreen> {
                       seasonNumber: _seasonOf(entry),
                       dataKey: _groupKey,
                       episode: _episodeFor(entry),
+                      posterUrl: _seriesPosterUrl,
                       onTap: () => _openEntry(entry),
                       onToggleWatched: () => _toggleWatched(entry),
                     ),
@@ -1572,6 +1587,7 @@ class _EntryTile extends StatefulWidget {
     required this.dataKey,
     this.episode,
     this.onToggleWatched,
+    this.posterUrl,
   });
 
   /// The metadata key this row's season data is cached under.
@@ -1591,6 +1607,11 @@ class _EntryTile extends StatefulWidget {
   final TmdEpisode? episode;
   final VoidCallback? onToggleWatched;
 
+  /// The show's poster, used when an episode has no still of its own.
+  ///
+  /// A movie-part row has no episode at all, so there is no still to show and
+  /// the row used to render a bare icon (issue #47).
+  final String? posterUrl;
 
   @override
   State<_EntryTile> createState() => _EntryTileState();
@@ -1784,10 +1805,10 @@ class _EntryTileState extends State<_EntryTile> {
     );
 
     return EpisodeRow(
-      thumbBuilder: (size) => EpisodeStillThumb(
-      stillUrl: stillUrl,
-      size: size,
-    ),
+      // No thumbBuilder: the row default already does still -> poster -> icon
+    // (issue #47).
+    stillUrl: stillUrl,
+    posterUrl: widget.posterUrl,
       title: titleWidget,
       subtitle: subtitleWidget,
       trailing: onToggleWatched != null

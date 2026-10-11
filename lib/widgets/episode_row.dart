@@ -203,6 +203,8 @@ class EpisodeRow extends StatelessWidget {
     super.key,
     required this.title,
     this.thumbBuilder,
+    this.stillUrl,
+    this.posterUrl,
     this.subtitle,
     this.progress,
     this.trailing,
@@ -219,6 +221,22 @@ class EpisodeRow extends StatelessWidget {
   /// A builder, not a widget: the size is only known after layout, and a
   /// widget built by the caller could not be told about it.
   final Widget Function(EpisodeThumbSize size)? thumbBuilder;
+
+  /// The episode's own still, used by the DEFAULT thumbnail.
+  ///
+  /// Ignored when [thumbBuilder] is supplied, so a caller that needs a custom
+  /// shape keeps full control.
+  final String? stillUrl;
+
+  /// Poster shown by the DEFAULT thumbnail when the episode has no still.
+  ///
+  /// A movie-part row has no episode, so there is no still and it used to
+  /// render a bare icon even though the show had a perfectly good poster
+  /// (issue #47). Rows that need a different shape keep passing [thumbBuilder];
+  /// the contract for "still, else poster, else icon" then lives in one place
+  /// instead of being re-spelled at every call site - which is how three of
+  /// the seven browsers silently dropped it.
+  final String? posterUrl;
 
   final Widget? subtitle;
 
@@ -336,7 +354,14 @@ class EpisodeRow extends StatelessWidget {
               ? 0
               : (trailingWidth ?? defaultTrailingWidth),
         );
-        final thumb = thumbBuilder?.call(size);
+        // Default thumbnail carries the poster fallback so the common case does not
+        // have to re-spell it at every call site (issue #47).
+        final thumb = thumbBuilder?.call(size) ??
+            EpisodeStillThumb(
+              stillUrl: stillUrl,
+              posterUrl: posterUrl,
+              size: size,
+            );
 
         final text = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,10 +411,8 @@ class EpisodeRow extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      if (thumb != null) ...[
-                        thumb,
-                        const SizedBox(width: gap),
-                      ],
+                      thumb,
+                      const SizedBox(width: gap),
                       Expanded(child: text),
                       if (trailing != null) ...[
                         const SizedBox(width: trailingGap),

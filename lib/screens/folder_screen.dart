@@ -2381,6 +2381,10 @@ class _FolderTile extends StatelessWidget {
         ? 'S${effectiveSeason.toString().padLeft(2, '0')}E${parsed.episode.toString().padLeft(2, '0')}'
         : '';
     final stillUrl = episode?.stillUrl();
+    // No still -> show the show's poster. Without this the row dropped to the
+    // bare icon, which is what a movie-part folder (no episode, so no still)
+    // always rendered (issue #47).
+    final posterUrl = posterUrlOf(tmdbMeta);
 
     final double? progress = (resumePositionMs != null &&
             resumePositionMs! > 0 &&
@@ -2477,10 +2481,10 @@ class _FolderTile extends StatelessWidget {
     );
 
     return EpisodeRow(
-      thumbBuilder: (size) => EpisodeStillThumb(
-      stillUrl: stillUrl,
-      size: size,
-    ),
+      // No thumbBuilder: the row's own default already does still -> poster ->
+    // icon, and re-spelling it here is how this call site drifted (issue #47).
+    stillUrl: stillUrl,
+    posterUrl: posterUrl,
       title: titleWidget,
       subtitle: subtitleWidget,
       onTap: onTap,

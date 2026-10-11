@@ -1895,6 +1895,7 @@ class _SmbSeasonExpansion extends StatelessWidget {
             onTap: () => onTapEntry(entry),
             onToggleWatched: () => onToggleWatched(entry),
             seasonOverride: season,
+            posterUrl: posterUrlOf(cachedMeta),
             resumeProgress: ResumeProgressHelper.progressFor(
                 keyOf(entry), resumePositionsMs, durationsMs,
                 fallbackDurationMs: _episodeFallbackDurationMs(entry, seasonData)),
@@ -1952,6 +1953,7 @@ class _SmbEpisodeTile extends StatelessWidget {
     this.seasonOverride,
     this.resumeProgress,
     this.effectiveSize,
+    this.posterUrl,
   });
 
   final SmbEntry entry;
@@ -1970,6 +1972,12 @@ class _SmbEpisodeTile extends StatelessWidget {
   /// Background-fetched file size (bytes), overriding entry.size which is 0
   /// when the native listing skipped per-file length() for performance.
   final int? effectiveSize;
+
+  /// The show's poster, used when an episode has no still of its own.
+  ///
+  /// A movie-part row has no episode at all, so there is no still to show and
+  /// the row used to render a bare icon (issue #47).
+  final String? posterUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -1990,6 +1998,7 @@ class _SmbEpisodeTile extends StatelessWidget {
     final tile = EpisodeRow(
       thumbBuilder: (size) => EpisodeStillThumb(
         stillUrl: stillUrl,
+        posterUrl: posterUrl,
         fallbackIcon: _episodeIcon(colorScheme, parsed),
         size: size,
       ),

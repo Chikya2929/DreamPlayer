@@ -762,7 +762,7 @@ class _JellyfinTile extends StatelessWidget {
         : '';
 
     final stillUrl = episode?.stillUrl();
-    final posterUrl = stillUrl ?? posterUrlOf(tmdbMeta);
+    final posterUrl = posterUrlOf(tmdbMeta);
 
     final filenameWidget = Text(
       item.name,

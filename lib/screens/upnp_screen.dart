@@ -632,7 +632,7 @@ class _UpnpScreenState extends State<UpnpScreen> {
                                   : '';
                               final episode = _episodeFor(e);
                               final stillUrl = episode?.stillUrl();
-                              final posterUrl = stillUrl ?? posterUrlOf(tmdbMeta);
+                              final posterUrl = posterUrlOf(tmdbMeta);
 
                               final filenameWidget = Text(
                                 e.name,

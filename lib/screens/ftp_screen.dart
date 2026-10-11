@@ -657,7 +657,7 @@ class _FtpTile extends StatelessWidget {
         : '';
 
     final stillUrl = episode?.stillUrl();
-    final posterUrl = stillUrl ?? posterUrlOf(tmdbMeta);
+    final posterUrl = posterUrlOf(tmdbMeta);
 
     final filenameWidget = Text(
       entry.name,
