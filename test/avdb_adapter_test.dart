@@ -1,0 +1,249 @@
+import 'dart:convert';
+
+import 'package:dream_player/services/avdb_adapter.dart';
+import 'package:dream_player/services/metadata_provider_adapter.dart';
+import 'package:dream_player/services/tmdb_client.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// AVDb adapter for issue #46 part 2.
+///
+/// The fixtures below are TRIMMED from live responses captured 2026-10-11
+/// against `https://avdbapi.com/api.php/provide/vod` — deliberately keeping
+/// the fields that differ between endpoints, because that difference is what
+/// the adapter has to survive:
+///
+/// * `ac=list` returns no `poster_url`/`description` at all.
+/// * `ac=detail&wd=` returns everything, and wraps it in Maccms `code`/`list`.
+/// * `time` is a DURATION "01:58:34", while the release date lives in
+///   `created_at`/`vod_pubdate` — reading one as the other is a real bug.
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const detailEnvelope = '''
+  {
+    "code": 1,
+    "msg": "Data list",
+    "page": 1,
+    "pagecount": 1,
+    "total": 999,
+    "list": [
+      {
+        "type_name": "Censored",
+        "episodes": {"server_name": "VIP #1", "server_data": {}},
+        "id": 83,
+        "name": "MIAA-818 Targeted By A Big Dick Gangster Patient",
+        "slug": "miaa-818",
+        "origin_name": "MIAA-818 (original)",
+        "tag": "",
+        "category": ["Nurse", "Wife", "Censored"],
+        "poster_url": "https://upload18.cc/v/miaa-818/poster.jpg",
+        "thumb_url": "https://upload18.cc/v/miaa-818/thumb.jpg",
+        "actor": ["Jun Suehiro"],
+        "director": ["Captain Gangwon"],
+        "movie_code": "MIAA-818",
+        "created_at": "14 Apr, 2023",
+        "country": ["Japan"],
+        "year": "2023",
+        "quality": "HD",
+        "status": "Release",
+        "time": "01:58:34",
+        "description": "A young wife nurse..."
+      }
+    ]
+  }
+  ''';
+
+  /// A list-mode record: no poster, no description. Used to prove the adapter
+  /// does not invent data it was not given.
+  const listEnvelope = '''
+  {
+    "code": 1,
+    "msg": "Data list",
+    "page": 1,
+    "total": 523914,
+    "list": [
+      {
+        "type_name": "Chinese AV",
+        "id": 638394,
+        "name": "TZ164 - Sakura Girl Sex Record [EP9]",
+        "origin_name": "TZ164 櫻花妹性愛實錄",
+        "category": ["Chinese AV"],
+        "actor": ["Updating"],
+        "movie_code": "TZ164",
+        "vod_time": "2026-10-11 01:21:53"
+      }
+    ]
+  }
+  ''';
+
+  AvdbAdapter buildAdapter({Map<String, dynamic>? response}) {
+    return AvdbAdapter(
+      transport: (uri) async => response ?? _decode(detailEnvelope),
+    );
+  }
+
+  group('AVDb search', () {
+    test('maps a detail record into a TmdMovie', () async {
+      final adapter = buildAdapter();
+      final results = await adapter.search('miaa-818');
+      expect(results, hasLength(1));
+      final movie = results.single;
+      expect(movie.id, 83);
+      expect(movie.title, startsWith('MIAA-818'));
+      expect(movie.year, 2023);
+      expect(movie.kind, TmdKind.movie);
+      expect(movie.provider, MetadataProvider.external);
+    });
+
+    test('prefers poster_url over thumb_url', () async {
+      final adapter = buildAdapter();
+      final movie = (await adapter.search('miaa-818')).single;
+      expect(movie.posterPath, 'https://upload18.cc/v/miaa-818/poster.jpg');
+    });
+
+    test('falls back to thumb_url when poster_url is absent', () async {
+      final adapter = buildAdapter(response: _decode(detailEnvelope.replaceAll(
+          '"poster_url": "https://upload18.cc/v/miaa-818/poster.jpg",','')));
+      final movie = (await adapter.search('miaa-818')).single;
+      expect(movie.posterPath, 'https://upload18.cc/v/miaa-818/thumb.jpg');
+    });
+
+    test('keeps the JAV code as an alternate title for matching', () async {
+      final adapter = buildAdapter();
+      final movie = (await adapter.search('miaa-818')).single;
+      expect(movie.alternateTitles, contains('MIAA-818'));
+    });
+
+    test('a record with no artwork yields a null poster, not a bad URL', () async {
+      // ac=list genuinely omits it; the row must fall back to its icon rather
+      // than pointing at image.tmdb.org with an AVDb path.
+      final adapter = buildAdapter(response: _decode(listEnvelope));
+      final movie = (await adapter.search('sakura')).single;
+      expect(movie.posterPath, isNull);
+      expect(movie.posterUrl(), isNull);
+    });
+
+    test('refuses TV — AVDb is a movie catalogue', () async {
+      final adapter = buildAdapter();
+      expect(await adapter.search('anything', kind: TmdKind.tv), isEmpty);
+    });
+
+    test('an empty query is not sent to the network', () async {
+      var calls = 0;
+      final adapter = AvdbAdapter(transport: (uri) async {
+        calls++;
+        return _decode(detailEnvelope);
+      });
+      expect(await adapter.search('   '), isEmpty);
+      expect(calls, 0);
+    });
+
+    test('a provider-level failure is treated as no match, not an error', () async {
+      // Maccms signals failure with code != 1; a body without `list` must not
+      // blow up the caller that is mid-resolution across providers.
+      final adapter = buildAdapter(response: const <String, dynamic>{});
+      expect(await adapter.search('miaa-818'), isEmpty);
+    });
+
+    test('a throwing transport also yields no match', () async {
+      final adapter = AvdbAdapter(
+        transport: (uri) async => throw StateError('offline'),
+      );
+      expect(await adapter.search('miaa-818'), isEmpty);
+    });
+
+    test('the query is sent as a detail search, not a list browse', () async {
+      Uri? seen;
+      final adapter = AvdbAdapter(transport: (uri) async {
+        seen = uri;
+        return _decode(detailEnvelope);
+      });
+      await adapter.search('miaa 818');
+      expect(seen!.queryParameters['ac'], 'detail');
+      expect(seen!.queryParameters['wd'], 'miaa 818');
+    });
+  });
+
+  group('AVDb details', () {
+    test('maps runtime from the HH:MM:SS duration, not the date', () async {
+      final adapter = buildAdapter();
+      final movie = (await adapter.search('miaa-818')).single;
+      final details = await adapter.details(movie);
+      expect(details, isNotNull);
+      // 1h58m34s -> 118 minutes. Reading "01:58:34" as a time-of-day or
+      // using created_at ("14 Apr, 2023") instead would give a wrong number.
+      expect(details!.runtimeMinutes, 118);
+      expect(details.year, 2023);
+      expect(details.genres, contains('Nurse'));
+      expect(details.cast.map((c) => c.name), contains('Jun Suehiro'));
+      expect(details.overview, 'A young wife nurse...');
+    });
+
+    test('parses MM:SS and rejects nonsense', () async {
+      expect(AvdbAdapter.runtimeMinutesFrom('45:30'), 45);
+      expect(AvdbAdapter.runtimeMinutesFrom('1:58:34'), 118);
+      expect(AvdbAdapter.runtimeMinutesFrom('not a time'), isNull);
+      expect(AvdbAdapter.runtimeMinutesFrom(null), isNull);
+    });
+
+    test('refuses a movie from another provider', () async {
+      final adapter = buildAdapter();
+      final tmdbMovie = TmdMovie(id: 1, title: 'x');
+      expect(await adapter.details(tmdbMovie), isNull);
+    });
+  });
+
+  group('AVDb enable switch', () {
+    // The adapter is a singleton in the app, so its cached flag leaks between
+    // cases unless every test states the starting state explicitly.
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      await AvdbAdapter.instance.setEnabled(false);
+    });
+
+    test('defaults to disabled, so nothing is queried out of the box', () async {
+      SharedPreferences.setMockInitialValues({});
+      final adapter = AvdbAdapter();
+      expect(await adapter.isConfigured(), isFalse);
+    });
+
+    test('persists the switch and reloads it', () async {
+      SharedPreferences.setMockInitialValues({});
+      await AvdbAdapter.instance.setEnabled(true);
+      expect(await AvdbAdapter.instance.isConfigured(), isTrue);
+    });
+
+    test('turning it off again persists', () async {
+      final adapter = AvdbAdapter();
+      await adapter.setEnabled(true);
+      await adapter.setEnabled(false);
+      expect(await AvdbAdapter().isConfigured(), isFalse);
+    });
+  });
+
+  group('registry integration', () {
+    test('AVDb registers and is skipped until enabled', () async {
+      SharedPreferences.setMockInitialValues({});
+      await AvdbAdapter.instance.setEnabled(false);
+      final registry = MetadataProviderRegistry.instance;
+      registry.unregister('avdb');
+      registry.register(AvdbAdapter.instance);
+      try {
+        expect(registry.byId('avdb'), isNotNull);
+        expect(await registry.configured(), isEmpty);
+
+        await AvdbAdapter.instance.setEnabled(true);
+        expect(
+          (await registry.configured()).map((a) => a.id),
+          contains('avdb'),
+        );
+      } finally {
+        registry.unregister('avdb');
+      }
+    });
+  });
+}
+
+Map<String, dynamic> _decode(String body) =>
+    jsonDecode(body) as Map<String, dynamic>;

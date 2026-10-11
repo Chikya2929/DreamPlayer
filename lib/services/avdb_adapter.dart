@@ -1,0 +1,301 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'image_cache_service.dart';
+import 'metadata_provider_adapter.dart';
+import 'tmdb_client.dart';
+
+const String avdbBaseUrl = 'https://avdbapi.com/api.php/provide/vod';
+const String avdbPrefsKey = 'dreamplayer.avdbEnabled';
+
+/// AVDb (avdbapi.com) as a [MetadataProviderAdapter] — issue #46, part 2.
+///
+/// Verified live before writing (2026-10-11): the service is up, needs **no
+/// API key**, and speaks the Maccms/苹果CMS `provide/vod` shape — `code`/`msg`/
+/// `page`/`total`/`list`. Relevant fields, which are NOT uniform across
+/// endpoints:
+///
+/// * `ac=list` (browse) returns `type_name`, `name`, `id`, `episodes`, but
+///   **no** `poster_url`/`thumb_url`/`description`.
+/// * `ac=detail&wd=<query>` returns the full record: `poster_url`,
+///   `thumb_url`, `description`, `year`, `time` (HH:MM:SS), `actor`,
+///   `director`, `country`, `category`, `movie_code` (the JAV code),
+///   `type_name`.
+///
+/// The non-uniformity is why [search] fetches a DETAIL response rather than a
+/// list one: without it every candidate would come back with a title and
+/// nothing else, and the row would render bare.
+///
+/// Scope, deliberately: AVDb is a **movie** catalogue, so this resolves
+/// `TmdKind.movie` and returns empty for TV. `seasons()` and `episode()` are
+/// left at their defaults — there are no seasons to invent, and a row with no
+/// still falls back to the poster (issue #47) rather than needing one.
+///
+/// There is no API key, so the Settings control is an on/off switch rather
+/// than a key field, and [isConfigured] reports that switch.
+class AvdbAdapter extends MetadataProviderAdapter {
+  /// The one instance the app uses.
+  ///
+  /// A singleton because the enabled flag is CACHED: Settings used to build a
+  /// fresh `AvdbAdapter()` per call while the registry held its own, so
+  /// flipping the switch wrote the preference but left the registered
+  /// adapter reporting the old value — the provider stayed invisible for the
+  /// rest of the session, and the Settings segment kept reading stale state.
+  static final AvdbAdapter instance = AvdbAdapter();
+
+  AvdbAdapter({
+    Future<SharedPreferences> Function()? preferences,
+    this.transport,
+    this.baseUrl = avdbBaseUrl,
+  }) : _preferences = preferences ?? SharedPreferences.getInstance;
+
+  final Future<SharedPreferences> Function() _preferences;
+
+  /// Test seam; null in the app, which uses the real HTTP path.
+  final Future<Map<String, dynamic>> Function(Uri uri)? transport;
+
+  final String baseUrl;
+
+  bool? _enabled;
+  bool _loaded = false;
+
+  @override
+  String get id => 'avdb';
+
+  @override
+  String get label => 'AVDb';
+
+  @override
+  String get credentialsHelp =>
+      'avdbapi.com needs no API key — just enable it.';
+
+  Future<bool> isEnabled() async {
+    if (_loaded) return _enabled ?? false;
+    try {
+      final prefs = await _preferences();
+      _enabled = prefs.getBool(avdbPrefsKey) ?? false;
+    } catch (_) {
+      _enabled = false;
+    }
+    _loaded = true;
+    return _enabled ?? false;
+  }
+
+  Future<void> setEnabled(bool value) async {
+    _enabled = value;
+    _loaded = true;
+    try {
+      final prefs = await _preferences();
+      await prefs.setBool(avdbPrefsKey, value);
+    } catch (_) {
+      // Keep the in-memory value so the switch works for this session even if
+      // the write failed.
+    }
+  }
+
+  @override
+  Future<bool> isConfigured() => isEnabled();
+
+  @override
+  Future<List<TmdMovie>> search(
+    String query, {
+    TmdKind kind = TmdKind.movie,
+  }) async {
+    if (kind != TmdKind.movie) return const [];
+    final term = query.trim();
+    if (term.isEmpty) return const [];
+
+    Uri uri;
+    try {
+      uri = Uri.parse('$baseUrl?ac=detail&wd=${Uri.encodeQueryComponent(term)}');
+    } on FormatException {
+      return const [];
+    }
+
+    final Map<String, dynamic> json;
+    try {
+      json = await (transport?.call(uri) ?? _get(uri));
+    } catch (_) {
+      // A provider that cannot be reached is "no match", never an error: the
+      // caller falls through to the next one.
+      return const [];
+    }
+
+    final list = json['list'];
+    if (list is! List) return const [];
+    return <TmdMovie>[
+      for (final item in list)
+        if (item is Map<String, dynamic>) ?parseMovie(item),
+    ];
+  }
+
+  @override
+  Future<TmdDetails?> details(TmdMovie movie) async {
+    // AVDb ids are integers, and the adapter only ever hands out its own.
+    if (movie.provider != MetadataProvider.external) return null;
+    try {
+      final uri = Uri.parse('$baseUrl?ac=detail&ids=${movie.id}');
+      final json = await (transport?.call(uri) ?? _get(uri));
+      final list = json['list'];
+      if (list is! List || list.isEmpty || list.first is! Map) return null;
+      final record = Map<String, dynamic>.from(list.first as Map);
+      return _detailsFrom(record);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// AVDb returns absolute image URLs, while `posterPath`/`backdropPath` are
+  /// host-less paths that `metadataImageUrl` prefixes with TMDB's image host.
+  /// Storing a full URL works because `metadataImageUrl` passes anything
+  /// already absolute straight through — verified in its own branch — but it is
+  /// checked here so a future change there fails loudly in this adapter's
+  /// tests instead of silently pointing every poster at image.tmdb.org.
+  static TmdMovie? parseMovie(Map<String, dynamic> item) {
+    final id = _intValue(item['id']);
+    if (id == null || id <= 0) return null;
+    final name = _string(item['name']) ?? _string(item['origin_name']);
+    if (name == null || name.isEmpty) return null;
+
+    final poster = _firstString(item, const ['poster_url', 'thumb_url']);
+    final year = _intValue(item['year']);
+    // AVDb has no ratings at all, so voteAverage stays 0 and the row shows no
+    // star rather than a fake score.
+    final code = _string(item['movie_code']);
+
+    return TmdMovie(
+      id: id,
+      title: name,
+      year: year,
+      posterPath: poster,
+      overview: _string(item['description']) ?? '',
+      kind: TmdKind.movie,
+      provider: MetadataProvider.external,
+      originalTitle: _string(item['origin_name']),
+      alternateTitles: <String>[if (code != null && code != name) code],
+    );
+  }
+
+  TmdDetails _detailsFrom(Map<String, dynamic> record) {
+    final movie = parseMovie(record)!;
+    final runtime = _runtimeMinutes(_string(record['time']));
+    final categories = _stringList(record['category']);
+    final cast = <TmdCastMember>[
+      for (final actor in _stringList(record['actor']))
+        TmdCastMember(name: actor, character: '', profilePath: null),
+    ];
+    final directors = _stringList(record['director']);
+
+    return TmdDetails(
+      title: movie.title,
+      overview: movie.overview,
+      year: movie.year,
+      runtimeMinutes: runtime,
+      genres: categories,
+      cast: cast,
+      tagline: directors.isEmpty ? null : 'Directed by ${directors.join(', ')}',
+      posterPath: movie.posterPath,
+      originalTitle: movie.originalTitle,
+    );
+  }
+
+  // ---- parsing helpers -------------------------------------------------
+
+  static String? _string(dynamic value) {
+    if (value == null) return null;
+    final text = value is String ? value.trim() : value.toString().trim();
+    return text.isEmpty ? null : text;
+  }
+
+  static int? _intValue(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) return null;
+    final parsed = int.tryParse(text);
+    if (parsed != null) return parsed;
+    // `year` arrives as "2023"; `created_at` as "14 Apr, 2023".
+    final match = RegExp(r'(\d{4})').firstMatch(text);
+    return match == null ? null : int.tryParse(match.group(1)!);
+  }
+
+  /// AVDb's `time` is a duration "HH:MM:SS" (or "MM:SS"), NOT a release date —
+  /// the release date is `vod_pubdate`/`created_at`.
+  /// Visible for tests: the duration parsing is subtle enough (a duration,
+  /// not a clock time) to be worth pinning directly.
+  static int? runtimeMinutesFrom(String? time) => _runtimeMinutes(time);
+
+  static int? _runtimeMinutes(String? time) {
+    if (time == null) return null;
+    final parts = time.split(':');
+    if (parts.length < 2 || parts.length > 3) return null;
+    var seconds = 0;
+    for (final part in parts) {
+      final value = int.tryParse(part.trim());
+      if (value == null) return null;
+      seconds = seconds * 60 + value;
+    }
+    final minutes = seconds ~/ 60;
+    return minutes <= 0 ? null : minutes;
+  }
+
+  static List<String> _stringList(dynamic value) {
+    if (value is! List) {
+      final single = _string(value);
+      return single == null ? const [] : <String>[single];
+    }
+    return <String>[
+      for (final item in value) ?_string(item),
+    ];
+  }
+
+  static String? _firstString(Map<String, dynamic> map, List<String> keys) {
+    for (final key in keys) {
+      if (_string(map[key]) case final value?) return value;
+    }
+    return null;
+  }
+
+  // ---- transport --------------------------------------------------------
+
+  Future<Map<String, dynamic>> _get(Uri uri) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final request = await client
+          .getUrl(uri)
+          .timeout(const Duration(seconds: 15));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      if (response.statusCode != 200) {
+        throw HttpException('AVDb returned ${response.statusCode}');
+      }
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Unexpected AVDb response.');
+      }
+      // Maccms wraps everything: code 1 means success, anything else is a
+      // provider-level failure and must not be parsed as a result set.
+      if (decoded['code'] != 1) return const <String, dynamic>{};
+      return decoded;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Download an AVDb poster into the shared offline image cache.
+  ///
+  /// AVDb artwork lives on third-party hosts that are not in the TMDB image
+  /// pipeline, so it is fetched once here rather than per-row. Kept public so
+  /// the service layer can prefetch the same way TMDB artwork is prefetched.
+  void prefetchPoster(String? url) {
+    if (url == null || url.isEmpty) return;
+    ImageCacheService.instance.prefetchImages(posterUrl: url);
+  }
+}

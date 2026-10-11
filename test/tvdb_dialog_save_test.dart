@@ -85,7 +85,12 @@ void main() {
     );
       await openRow(tester, metadata);
 
-    final tvdbTile = find.text('TheTVDB metadata');
+    // TheTVDB's credential field is only shown once TheTVDB is the selected
+    // provider (issue #46), so pick it first. Default is TMDB.
+    await openRow(tester, find.byKey(const ValueKey('providerCell-theTvdb')));
+    await tester.pumpAndSettle();
+
+    final tvdbTile = find.text('TheTVDB API key');
     expect(tvdbTile, findsOneWidget);
       await openRow(tester, tvdbTile.first);
 

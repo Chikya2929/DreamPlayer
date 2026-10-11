@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'app.dart';
 import 'services/accent_store.dart';
+import 'services/avdb_adapter.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'services/app_debug_log.dart';
@@ -13,6 +14,7 @@ import 'services/download_manager.dart';
 import 'services/entitlements.dart';
 import 'services/image_cache_service.dart';
 import 'services/language_service.dart';
+import 'services/metadata_provider_adapter.dart';
 import 'services/layout_store.dart';
 import 'services/font_store.dart';
 import 'utils/tv_helper.dart';
@@ -34,6 +36,10 @@ Future<void> main() async {
   // StoreKit entitlement + 7-day trial state (iOS-only monetization; Android
   // stays permanently advanced — see Entitlements). Safe to run everywhere.
   unawaited(Entitlements.instance.init());
+  // External metadata providers (issue #46 part 2). Registered here so the
+  // Settings "External" segment appears as soon as an adapter exists; the
+  // registry is inert until a provider is enabled.
+  MetadataProviderRegistry.instance.register(AvdbAdapter.instance);
   // Write a boot line FIRST, before any screen can fail. Without it, "no
   // app_debug.log in Files" is ambiguous: it cannot tell a broken writer from
   // markers that simply never fired, because the file is only created by the

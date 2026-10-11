@@ -118,14 +118,23 @@ void main() {
       await tester.tap(metadata);
       await tester.pumpAndSettle();
 
-      // Both provider tiles must be reachable, not one or the other.
+      // Provider FIRST, then only that provider's credential. TMDB is the
+      // default, so TMDB's key field shows and TheTVDB's does not - but both
+      // are reachable through the provider table.
       expect(
         find.text(AppLocalizations.of(
           tester.element(find.byType(SettingsScreen)),
         ).settingsTmdbApiKey),
         findsOneWidget,
       );
-      expect(find.text('TheTVDB metadata'), findsOneWidget);
+      expect(find.text('TheTVDB API key'), findsNothing);
+      for (final name in const ['tmdb', 'theTvdb']) {
+        expect(
+          find.byKey(ValueKey('providerCell-$name')),
+          findsOneWidget,
+          reason: 'both providers must be offered in the provider table',
+        );
+      }
 
       // Issue #46: the long intro paragraph is gone. It had to go - it was
       // three screens of prose in front of two buttons - but the guarantee it

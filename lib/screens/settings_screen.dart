@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/adult_content_store.dart';
 import '../services/auto_play_store.dart';
+import '../services/avdb_adapter.dart';
 import '../services/badge_prefs.dart';
 import '../services/cache_cleaner.dart';
 import '../services/decoder_mode.dart';
@@ -94,6 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   MetadataProviderChoice _metadataProvider = MetadataProviderChoice.tmdb;
   String? _theTvdbStorageError;
   bool _includeAdult = false;
+  bool _avdbEnabled = false;
 
   /// Adapters registered by an external metadata provider (issue #46 part 2,
   /// e.g. AVDb). Empty until one ships, in which case the "External" segment
@@ -103,13 +105,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool get _externalSelected =>
       _metadataProvider == MetadataProviderChoice.external;
-
-  /// TheTVDB's fallback switch only means something while a BUILT-IN provider
-  /// is primary. In external mode TheTVDB is not a fallback for TMDB, so the
-  /// switch is hidden rather than shown disabled - a disabled control reads as
-  /// broken, and this one is simply not applicable.
-  bool get _showTheTvdbFallbackSwitch =>
-      _metadataProvider == MetadataProviderChoice.tmdb || _externalSelected;
 
   @override
   void initState() {
@@ -401,6 +396,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final fallback = await TheTvdbClient.isFallbackEnabled();
       _metadataProvider = await TheTvdbClient.providerChoice();
       final includeAdult = await AdultContentStore().load();
+      final avdbEnabled = await AvdbAdapter.instance.isEnabled();
       if (!mounted) return;
       setState(() {
         _theTvdbKey = store.apiKey ?? '';
@@ -408,6 +404,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _theTvdbFallback = fallback;
         _theTvdbStorageError = null;
         _includeAdult = includeAdult;
+        _avdbEnabled = avdbEnabled;
       });
     } catch (_) {
       if (!mounted) return;
@@ -564,6 +561,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _theTvdbFallback = enabled);
   }
 
+  /// The provider choices actually offered, in display order.
+  ///
+  /// External appears only once an adapter has registered, so the list is not
+  /// a hard-coded three.
+  List<MetadataProviderChoice> get _providerChoices => [
+        MetadataProviderChoice.tmdb,
+        MetadataProviderChoice.theTvdb,
+        if (_externalAdapters.isNotEmpty) MetadataProviderChoice.external,
+      ];
+
+  /// Space a chip needs beyond its label's own width: the label inset each
+  /// side plus the border. Kept tight on purpose.
+  ///
+  /// Chip label for a provider.
+  ///
+  /// "TheTVDB" is the long one: it is what would not fit as a segment of a
+  /// three-way SegmentedButton. It is kept as-is because the neighbouring tile
+  /// above already spells out "TheTVDB metadata", and a control that says
+  /// "TVDB" next to it just reads as a different provider.
+  String _providerLabel(MetadataProviderChoice choice) => switch (choice) {
+        MetadataProviderChoice.tmdb => 'TMDB',
+        // "TheTVDB" fits as a chip; it did NOT fit as a segmented button
+        // segment alongside an icon and two others.
+        MetadataProviderChoice.theTvdb => 'TheTVDB',
+        MetadataProviderChoice.external =>
+          _externalAdapters.length == 1
+              ? _externalAdapters.first.label
+              : 'External',
+      };
+
   /// One-line explanation of what the selected provider actually does.
   String _providerHelpText() => switch (_metadataProvider) {
         MetadataProviderChoice.tmdb =>
@@ -618,6 +645,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (key == null || !mounted) return;
     await adapter.saveApiKey(key);
     if (mounted) setState(() {});
+  }
+
+  /// AVDb on/off. Clearing the cache matters here too: a file that matched
+  /// nothing while AVDb was off may resolve once it is on.
+  Future<void> _setAvdbEnabled(bool value) async {
+    await AvdbAdapter.instance.setEnabled(value);
+    await TmdService.instance.clearAllResolved();
+    if (!mounted) return;
+    setState(() => _avdbEnabled = value);
   }
 
   /// Adult metadata (issue #46 part 1). Cached metadata is cleared because a
@@ -1572,27 +1608,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text(AppLocalizations.of(context).settingsMetadata),
               childrenPadding: const EdgeInsets.only(bottom: 8),
               children: [
-                 TvTile(
-                   leading: const Icon(Icons.movie),
-                   title: Text(AppLocalizations.of(context).settingsTmdbApiKey),
-                   subtitle: Text(
-                     _tmdbKey.isEmpty
-                         ? 'Not set'
-                         : 'Set (${_tmdbKey.substring(0, 4)}…${_tmdbKey.substring(_tmdbKey.length - 4)})',
+                 // Provider FIRST, then only that provider's credential.
+                 //
+                 // The selector used to sit below both key tiles, which made
+                 // the section read as three unrelated rows. Picking a provider
+                 // now reveals the ONE field it needs - TMDB's key, TheTVDB's
+                 // key, or an external provider's toggle - so a TheTVDB-only
+                 // user is never shown TMDB's empty key field first.
+                 Padding(
+                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                   child: Column(
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       const Text('Metadata provider'),
+                       const SizedBox(height: 8),
+                       _ProviderTableBox(
+                         choices: _providerChoices,
+                         selected: _metadataProvider,
+                         labelOf: _providerLabel,
+                         onSelected: _setMetadataProvider,
+                       ),
+                       const SizedBox(height: 6),
+                       Text(
+                         _providerHelpText(),
+                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                               color: Colors.white54,
+                             ),
+                       ),
+                     ],
                    ),
-                   onTap: _editTmdbKey,
                  ),
-                 TvTile(
-                   leading: const Icon(Icons.travel_explore),
-                   title: const Text('TheTVDB metadata'),
-                   subtitle: Text(
-                     _theTvdbStorageError ??
-                         (_theTvdbKey.isEmpty
-                             ? 'Not configured — optional; extra posters and backdrops'
-                             : 'Configured${_theTvdbPin.isEmpty ? '' : ' · PIN set'} · extra posters and backdrops'),
+                 // --- the selected provider's credential ---
+                 if (_metadataProvider == MetadataProviderChoice.tmdb) ...[
+                   TvTile(
+                     leading: const Icon(Icons.movie),
+                     title: Text(
+                       AppLocalizations.of(context).settingsTmdbApiKey,
+                     ),
+                     subtitle: Text(
+                       _tmdbKey.isEmpty
+                           ? 'Not set'
+                           : 'Set (${_tmdbKey.substring(0, 4)}…${_tmdbKey.substring(_tmdbKey.length - 4)})',
+                     ),
+                     onTap: _editTmdbKey,
                    ),
-                   onTap: _editTheTvdbCredentials,
-                 ),
+                   SwitchListTile(
+                     secondary: const Icon(Icons.merge_type),
+                     title: const Text('Use TheTVDB as fallback'),
+                     subtitle: const Text(
+                       'Used when TMDB has no confident match',
+                     ),
+                     value: _theTvdbFallback && _theTvdbKey.isNotEmpty,
+                     onChanged: _theTvdbKey.isEmpty
+                         ? null
+                         : (value) => _setTheTvdbFallback(value),
+                   ),
+                 ],
+                 if (_metadataProvider == MetadataProviderChoice.theTvdb)
+                   TvTile(
+                     leading: const Icon(Icons.travel_explore),
+                     title: const Text('TheTVDB API key'),
+                     subtitle: Text(
+                       _theTvdbStorageError ??
+                           (_theTvdbKey.isEmpty
+                               ? 'Not set'
+                               : 'Set${_theTvdbPin.isEmpty ? '' : ' · PIN set'}'),
+                     ),
+                     onTap: _editTheTvdbCredentials,
+                   ),
+                 // External providers (issue #46 part 2). AVDb needs no key, so
+                 // its field is an on/off switch; one that DOES need a key
+                 // still gets the tile + dialog.
+                 if (_externalSelected)
+                   for (final adapter in _externalAdapters)
+                     if (adapter is AvdbAdapter)
+                       SwitchListTile(
+                         secondary: const Icon(Icons.extension),
+                         title: const Text('Enable AVDb'),
+                         subtitle: const Text('No API key needed'),
+                         value: _avdbEnabled,
+                         onChanged: _setAvdbEnabled,
+                       )
+                     else
+                       TvTile(
+                         leading: const Icon(Icons.extension),
+                         title: Text('${adapter.label} API key'),
+                         subtitle: const Text('Primary provider'),
+                         onTap: () => _editExternalAdapter(adapter),
+                       ),
                  // Adult metadata (issue #46 part 1). TMDB is asked
                  // include_adult=false everywhere by default, so an adult title
                  // resolves to no match at all - measured live: query=hentai
@@ -1604,86 +1707,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                    value: _includeAdult,
                    onChanged: _setIncludeAdult,
                  ),
-                 // Which provider resolves metadata (Settings toggle). This is
-                 // a real choice, not the old fallback switch: picking TheTVDB
-                 // makes it the PRIMARY resolver, so a user with only a
-                 // TheTVDB key never queries TMDB at all.
-                 //
-                 // The "External" segment (issue #46 part 2) only appears once
-                 // an adapter has actually registered - offering a choice that
-                 // resolves nothing would be worse than not offering it.
-                 if (_externalAdapters.isNotEmpty)
-                   Padding(
-                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         const Text('Metadata provider'),
-                         const SizedBox(height: 8),
-                         SegmentedButton<MetadataProviderChoice>(
-                           segments: [
-                             const ButtonSegment(
-                               value: MetadataProviderChoice.tmdb,
-                               label: Text('TMDB'),
-                               icon: Icon(Icons.movie, size: 18),
-                             ),
-                             const ButtonSegment(
-                               value: MetadataProviderChoice.theTvdb,
-                               label: Text('TheTVDB'),
-                               icon: Icon(Icons.travel_explore, size: 18),
-                             ),
-                             ButtonSegment(
-                               value: MetadataProviderChoice.external,
-                               label: Text(
-                                 _externalAdapters.length == 1
-                                     ? _externalAdapters.first.label
-                                     : 'External',
-                               ),
-                               icon: const Icon(Icons.extension, size: 18),
-                             ),
-                           ],
-                           selected: {_metadataProvider},
-                           onSelectionChanged: (selection) =>
-                               _setMetadataProvider(selection.first),
-                         ),
-                         const SizedBox(height: 6),
-                         Text(
-                           _providerHelpText(),
-                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                 color: Colors.white54,
-                               ),
-                         ),
-                       ],
-                     ),
-                   ),
-                 // When an external provider is primary, ONLY its own field is
-                 // shown and TheTVDB becomes an opt-in fallback for it - not for
-                 // TMDB, which is not the resolver in that mode.
-                 if (_externalSelected)
-                   ..._externalAdapters.map(
-                     (adapter) => TvTile(
-                       leading: const Icon(Icons.extension),
-                       title: Text('${adapter.label} API key'),
-                       subtitle: const Text(
-                         'Primary provider',
-                       ),
-                       onTap: () => _editExternalAdapter(adapter),
-                     ),
-                   ),
-                 if (_showTheTvdbFallbackSwitch)
-                   SwitchListTile(
-                     secondary: const Icon(Icons.merge_type),
-                     title: const Text('Use TheTVDB as fallback'),
-                     subtitle: Text(
-                       _externalSelected
-                           ? 'TheTVDB is a fallback for the external provider here'
-                           : 'Only used when TMDB is the selected provider',
-                     ),
-                     value: _theTvdbFallback && _theTvdbKey.isNotEmpty,
-                     onChanged: _theTvdbKey.isEmpty
-                         ? null
-                         : (value) => _setTheTvdbFallback(value),
-                   ),
                ],
 
             ),
@@ -2564,6 +2587,128 @@ class _ScrollableRadioList extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: children,
+      ),
+    );
+  }
+}
+
+
+/// A single box divided into equal cells — one per metadata provider.
+///
+/// Not a row of separate chips and not a `SegmentedButton`. Both of those were
+/// tried and both failed the same requirement: three options that read as ONE
+/// control. Chips stagger to their own widths; a SegmentedButton lays out in a
+/// single non-wrapping row and *clips* when they do not fit, which is how
+/// "TheTVDB" got cut off.
+///
+/// This is one outlined rectangle with two internal dividers, so the cells are
+/// equal by construction and always sit on one line. The selected cell is
+/// filled; the dividers keep the group reading as a single unit.
+class _ProviderTableBox extends StatelessWidget {
+  const _ProviderTableBox({
+    required this.choices,
+    required this.selected,
+    required this.labelOf,
+    required this.onSelected,
+  });
+
+  final List<MetadataProviderChoice> choices;
+  final MetadataProviderChoice selected;
+  final String Function(MetadataProviderChoice) labelOf;
+  final void Function(MetadataProviderChoice) onSelected;
+
+  static const double _height = 44;
+  static const double _radius = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final outline = scheme.outlineVariant;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_radius),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: outline),
+          borderRadius: BorderRadius.circular(_radius),
+        ),
+        child: SizedBox(
+          height: _height,
+          child: Row(
+            // stretch so the internal dividers span the full cell height.
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < choices.length; i++) ...[
+                if (i > 0)
+                  SizedBox(
+                    width: 1,
+                    child: ColoredBox(color: outline),
+                  ),
+                Expanded(
+                  child: _ProviderCell(
+                    key: ValueKey('providerCell-${choices[i].name}'),
+                    label: labelOf(choices[i]),
+                    selected: choices[i] == selected,
+                    scheme: scheme,
+                    textTheme: theme.textTheme,
+                    onTap: () => onSelected(choices[i]),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One cell of [_ProviderTableBox].
+class _ProviderCell extends StatelessWidget {
+  const _ProviderCell({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.scheme,
+    required this.textTheme,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final ColorScheme scheme;
+  final TextTheme textTheme;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected ? scheme.onPrimary : scheme.onSurface;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        child: ColoredBox(
+          color: selected ? scheme.primary : Colors.transparent,
+          child: Center(
+            // scaleDown rather than clip or ellipsise: the cells are fixed by
+            // the row, so a long label at a large text scale must shrink
+            // instead of being cut off.
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: textTheme.labelLarge?.copyWith(color: foreground),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

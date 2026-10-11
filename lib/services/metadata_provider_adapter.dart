@@ -52,7 +52,10 @@ abstract class MetadataProviderAdapter {
 
   /// Seasons and episodes. Optional: a provider that cannot supply them may
   /// return an empty list, and the season screen falls back to filename parsing.
-  Future<List<TmdSeason>> seasons(TmdMovie movie);
+  ///
+  /// Defaulted (rather than abstract) so a single-film catalogue — AVDb, or any
+  /// source with no notion of a season — is four methods, not six.
+  Future<List<TmdSeason>> seasons(TmdMovie movie) async => const [];
 
   /// Per-episode detail, including stills and cast where available.
   Future<TmdEpisode?> episode(TmdMovie movie, int season, int episode) =>
