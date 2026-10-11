@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:dream_player/l10n/app_localizations.dart';
 import 'package:dream_player/models/video_item.dart';
@@ -171,7 +171,10 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(deleted, isEmpty, reason: 'cancel must not delete');
-  });
+  
+  // The native delete is `File.delete()` plus a guarded recursive walk in
+  // FileBrowser.kt; iOS has no equivalent, so the menu item is gated off there.
+  }, skip: !Platform.isAndroid);
 
   testWidgets('Delete removes every selected file after confirming',
       (tester) async {
@@ -212,7 +215,10 @@ void main() {
         ]),
       );
     }
-  });
+  
+  // The native delete is `File.delete()` plus a guarded recursive walk in
+  // FileBrowser.kt; iOS has no equivalent, so the menu item is gated off there.
+  }, skip: !Platform.isAndroid);
 
   testWidgets('closing the selection returns to normal tap-to-open',
       (tester) async {
@@ -254,7 +260,10 @@ void main() {
     expect(find.text('Delete 1 item?'), findsOneWidget);
     expect(find.textContaining('INCLUDING the contents of any folder'),
         findsOneWidget);
-  });
+  
+  // The native delete is `File.delete()` plus a guarded recursive walk in
+  // FileBrowser.kt; iOS has no equivalent, so the menu item is gated off there.
+  }, skip: !Platform.isAndroid);
 
   testWidgets('Download to device is queued, not copied synchronously',
       (tester) async {
@@ -333,5 +342,18 @@ void main() {
     test('a SAF content:// URI does not', () {
       expect(showsDownload('content://tree/1A2B/document/2'), isFalse);
     });
+  });
+
+  // Delete is Android-only, so the gate itself is asserted against the source:
+  // a non-Android host cannot open the menu at all, which would make the three
+  // skipped tests above silently cover nothing.
+  test('the Delete menu item is gated to Android', () {
+    final source =
+        File('lib/screens/file_browser_screen.dart').readAsStringSync();
+    expect(
+      source.contains('if (Platform.isAndroid)'),
+      isTrue,
+      reason: 'without the gate, iOS shows a Delete item that can only fail',
+    );
   });
 }

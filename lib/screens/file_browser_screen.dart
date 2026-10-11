@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -494,8 +495,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
                 if (value == 'delete') _confirmDeleteSelection();
                 if (value == 'download') _copySelectionToDownloads();
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
+              itemBuilder: (context) => [
+                const PopupMenuItem(
                   value: 'download',
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -503,14 +504,20 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
                     title: Text('Download to device'),
                   ),
                 ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.delete_outline),
-                    title: Text('Delete'),
+                // Delete is Android-only: the native side is `File.delete()`
+                // plus a recursive walk guarded by `isDeletableTarget`, and
+                // iOS has no equivalent in FileBrowser.swift. Offering it there
+                // and then failing with "only supported on Android" is worse
+                // than not offering it.
+                if (Platform.isAndroid)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete'),
+                    ),
                   ),
-                ),
               ],
             ),
           ],
