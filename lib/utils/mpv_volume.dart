@@ -39,9 +39,6 @@ const double kMaxVolumeNoBoost = 1.0;
 /// boosted value.
 const double kMpvVolumeMax = 400.0;
 
-/// True peak ceiling for the MPV limiter, ~-1 dBFS (0.891 linear).
-const double kMpvLimitCeiling = 0.891;
-
 /// Extra lift for Night Mode, approximating the +4 dB the native engine gets
 /// from its own DynamicsProcessing stage.
 const double kMpvNightMultiplier = 1.6;
@@ -60,23 +57,34 @@ double mpvVolumePercent({
   return vol > kMpvVolumeMax ? kMpvVolumeMax : vol;
 }
 
-/// The limiter-only `af` chain for MPV, or null when no boost is wanted.
+/// MPV has NO peak limiter, and cannot be given one.
 ///
-/// Deliberately carries NO gain: the gain is in [mpvVolumePercent]. So this
-/// string is CONSTANT while boost is on, which means the volume gesture does
-/// not rebuild mpv's filter graph on every frame — only when crossing the
-/// boost threshold. Attaching a limiter that silently fails is still right:
-/// without it the boost clips.
-String? mpvBoostFilter(double boost, {required bool nightMode}) {
-  final gain = nightMode ? boost * kMpvNightMultiplier : boost;
-  if (gain <= 1.01) return null;
-  // The graph MUST be single-quoted. `af` is an mpv *object settings list*
-  // option, so mpv tokenises the value on commas — an unquoted graph is split
-  // into two invalid list items and the whole chain fails to build. mpv's
-  // manual is explicit: "Don't forget to quote libavfilter graphs".
-  return "lavfi='[alimiter=level_in=1:level_out=1:"
-      "limit=$kMpvLimitCeiling:attack=5:release=50]'";
-}
+/// This is a measured, closed conclusion — five forms were tried against a real
+/// device and every one failed, two of them SILENTLY:
+///
+/// | Form | Result |
+/// |---|---|
+/// | `lavfi='[alimiter=…]'` | `af` reads back EMPTY. Rejected, no error. |
+/// | `lavfi-graph=alimiter=…` | `option af: lavfi-graph isn't supported` |
+/// | `lavfi=graph=alimiter:a=1:b=2` | sub-options split on `:` |
+/// | `lavfi=alimiter=limit=0.891` | `Error while parsing lavfi parameter alimiter (limit)` |
+/// | `lavfi=alimiter` (bare) | accepted, but all defaults ⇒ `limit=1`, no limiting |
+///
+/// The last row is the decisive one. mpv parses everything after `lavfi=` as
+/// **sub-option name=value pairs**, so a value may be a single token with no
+/// `=` in it. `lavfi=anull` works for exactly that reason — one bare token,
+/// which mpv maps onto the filter's `graph` sub-option. Any attempt to pass
+/// filter *options* turns the filter name into a sub-option name, and the
+/// whole `af` set is rejected — sometimes without a word of it.
+///
+/// So MPV's boost rides on `volume` alone (see [mpvVolumePercent]) and will
+/// CLIP at high settings rather than limit. That is a known, accepted limit,
+/// not an oversight. The engine that gets a proper compressor + limiter is the
+/// native one, via `DynamicsBoost` (API 28+), which is where boost is used by
+/// default. Adding a limiter to MPV would need a different filter-delivery
+/// mechanism — a Lua script or a custom libmpv — not another `af` string.
+/// Do not add an `af` write to `_applyMpvVolume` without re-running the probe
+/// in that file first.
 
 /// The two values a volume gesture has to push: the system volume and the
 /// engine make-up.
@@ -106,6 +114,33 @@ class VolumeSplit {
   @override
   String toString() => 'VolumeSplit(system: ${system.toStringAsFixed(3)}, '
       'boost: ${boost.toStringAsFixed(3)})';
+}
+
+/// Where a NEW volume gesture starts from, given the live system volume and
+/// the boost the user last left applied.
+///
+/// The gesture is one continuous 0-200% range, but the level lives in a
+/// different place depending on which side of 100% it is, so the base has to
+/// follow it:
+///
+///   * boost above 1.0 — the system volume is pinned at max and [boost] is
+///     what holds the level, so the base is [boost].
+///   * boost at 1.0 — the boost is not in play at all and the system volume IS
+///     the level, so the base is [systemVolume].
+///
+/// Two wrong versions of this shipped first, both from trying to be clever:
+/// reading only [boost] made every gesture start at 100%, and taking
+/// `max(systemVolume, boost)` did the same thing from the other side —
+/// `max(0.3, 1.0)` is `1.0`, so any volume below 100% snapped upward. The
+/// lesson is that this is a question with a conditional answer, not a max.
+double volumeGestureBase({
+  required double systemVolume,
+  required double boost,
+  required bool boostEnabled,
+}) {
+  if (!boostEnabled) return systemVolume.clamp(0.0, kMaxVolumeNoBoost);
+  return boost > 1.0 ? boost.clamp(0.0, kMaxVolumeBoost)
+                     : systemVolume.clamp(0.0, kMaxVolumeNoBoost);
 }
 
 /// Splits a gesture value in 0..[volumeCeiling] into system volume + boost.

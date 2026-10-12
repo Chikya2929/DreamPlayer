@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dream_player/utils/mpv_volume.dart';
@@ -53,6 +55,74 @@ void main() {
     });
   });
 
+  group('volumeGestureBase', () {
+    // THE REPORTED BUG. Volume below 100%, swipe down, swipe down again: the
+    // second swipe restarted from 100% instead of continuing lower.
+    test('below 100% the gesture continues from the system volume', () {
+      expect(
+        volumeGestureBase(systemVolume: 0.3, boost: 1.0, boostEnabled: true),
+        0.3,
+      );
+    });
+
+    test('above 100% the gesture continues from the boost', () {
+      expect(
+        volumeGestureBase(systemVolume: 1.0, boost: 1.5, boostEnabled: true),
+        1.5,
+      );
+    });
+
+    // The tempting `max(systemVolume, boost)` is WRONG and this pins why:
+    // max(0.3, 1.0) == 1.0, so every level under 100% snapped upward.
+    test('is not a max of the two (max(0.3, 1.0) would be 1.0)', () {
+      final base = volumeGestureBase(
+          systemVolume: 0.3, boost: 1.0, boostEnabled: true);
+      expect(base, 0.3);
+      expect(math.max(0.3, 1.0), 1.0, reason: 'the buggy version would be 1.0');
+    });
+
+    test('exactly 100% is unambiguous from either side', () {
+      expect(
+        volumeGestureBase(systemVolume: 1.0, boost: 1.0, boostEnabled: true),
+        1.0,
+      );
+    });
+
+    // Walking the whole range must never move the base away from the current
+    // level, whichever side of 100% it sits on.
+    test('base always equals the current effective level', () {
+      for (var sys = 0.0; sys <= 1.0; sys += 0.1) {
+        expect(
+          volumeGestureBase(
+              systemVolume: sys, boost: 1.0, boostEnabled: true),
+          moreOrLessEquals(sys, epsilon: 1e-9),
+          reason: 'no boost active: system $sys must be the base',
+        );
+      }
+      for (var boost = 1.0; boost <= kMaxVolumeBoost; boost += 0.1) {
+        expect(
+          volumeGestureBase(
+              systemVolume: 1.0, boost: boost, boostEnabled: true),
+          moreOrLessEquals(boost, epsilon: 1e-9),
+          reason: 'boost $boost is active: it must be the base',
+        );
+      }
+    });
+
+    // With boost switched off the gesture is the stock 0-100% and must ignore
+    // any stale boost value entirely.
+    test('disabled: plain system volume, boost ignored', () {
+      expect(
+        volumeGestureBase(systemVolume: 0.4, boost: 2.0, boostEnabled: false),
+        0.4,
+      );
+      expect(
+        volumeGestureBase(systemVolume: 1.0, boost: 2.0, boostEnabled: false),
+        1.0,
+      );
+    });
+  });
+
   group('volumeCeiling', () {
     test('200% with boost, 100% without', () {
       expect(volumeCeiling(boostEnabled: true), 2.0);
@@ -101,46 +171,6 @@ void main() {
 
     test('never returns a negative volume', () {
       expect(mpvVolumePercent(baseFraction: -1.0, boost: 2.0, nightMode: false), 0);
-    });
-  });
-
-  group('mpvBoostFilter', () {
-    test('no boost means no filter at all', () {
-      expect(mpvBoostFilter(1.0, nightMode: false), isNull);
-      expect(mpvBoostFilter(1.005, nightMode: false), isNull);
-    });
-
-    // No gain in the filter. Putting it there AND on `volume` would double the
-    // boost; putting it only there means no boost at all on this build.
-    test('carries the limiter only, never gain', () {
-      final f = mpvBoostFilter(2.0, nightMode: false)!;
-      expect(f, isNot(contains('volume=')));
-      expect(f, contains('alimiter='));
-    });
-
-    // Because the string is constant, the volume gesture stops rebuilding
-    // mpv's filter graph on every drag frame.
-    test('is identical for any boost, so the graph is not rebuilt per frame', () {
-      expect(mpvBoostFilter(1.2, nightMode: false),
-          mpvBoostFilter(2.0, nightMode: false));
-    });
-
-    test('the graph is quoted so af does not split on an inner comma', () {
-      final f = mpvBoostFilter(2.0, nightMode: false)!;
-      expect(f, startsWith("lavfi='["));
-      expect(f, endsWith("]'"));
-      expect(RegExp(r"^[^']*'[^']*'$").hasMatch(f), isTrue,
-          reason: 'exactly one quoted section, so exactly one list item');
-    });
-
-    test('the limiter caps below full scale so peaks are limited, not clipped', () {
-      final f = mpvBoostFilter(2.0, nightMode: false)!;
-      expect(f, contains('limit=$kMpvLimitCeiling'));
-      expect(kMpvLimitCeiling, lessThan(1.0));
-    });
-
-    test('night mode keeps the limiter attached', () {
-      expect(mpvBoostFilter(1.5, nightMode: true), isNotNull);
     });
   });
 }

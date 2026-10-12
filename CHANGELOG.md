@@ -31,9 +31,33 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   and past that the system volume stays at max while the extra travel becomes
   over-amplification up to 2×. Both old sliders — the player ⋮ sheet and
   Settings → Audio — have been removed, because a slider there could only set a
-  value the gesture immediately overwrote. The MPV engine stages the same boost
-  through its audio filter chain (gain, then a −1 dBFS limiter) so it cannot
-  clip the way scaling mpv's own volume did.
+  value the gesture immediately overwrote.
+
+  The boost **level** is session state and is never remembered: every video
+  starts at 100% and you swipe past it deliberately, so a film never reopens at
+  200% of its own accord. Only the toggle is saved. The system volume is put
+  back where it was when the video closes, so boosting one film no longer
+  leaves the phone louder everywhere — unless you changed the volume yourself
+  while watching, which is left alone.
+
+- **MPV respects volume boost again.** The MPV branch of the player returned
+  before the audio settings were loaded, so "Play with MPV" started with the
+  boost toggle read as off and night mode disabled, and the volume gesture was
+  hard-clamped to 100%. The first two attempts to fix this chased the engine
+  and the audio filter chain; the cause was one `return` in the wrong place.
+
+  **On MPV the boost will still clip at high settings rather than limit.** mpv
+  cannot be given filter options through `af` in this build — five forms were
+  tried on device and every one was rejected, two of them silently — and the
+  reference mpv player for Android (mpvEx, 2.7k stars) does the same thing:
+  `volume-max` plus `volume`, with no limiter anywhere. Boost is smooth on the
+  **native** engine, which is where boost is used by default.
+
+- **Removed "Match MPV audio (FFmpeg)".** That switch was a diagnostic added
+  while investigating the MPV volume gap, not a feature: it pushed the native
+  engine onto libmpv's software FFmpeg decoder purely so the two could be
+  compared. The gap had a different cause, so it is gone rather than left as a
+  way to move the primary engine off the platform audio decoders.
 
 - **External USB drives and SD cards now appear in the file browser
   (issue #48).** The browser scanned `/storage` and skipped any entry named

@@ -403,16 +403,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// Volume boost (1.0–3.0) and Night Mode — persisted and re-applied on open.
   double _audioBoost = 1.0;
 
-  /// The `af` string currently pushed to mpv, so the filter chain is rebuilt
-  /// only when it actually differs. The volume gesture calls this on every
-  /// drag update; rebuilding an mpv filter graph per frame is expensive and
-  /// audibly rough, and mpv has no throttling of its own here.
-  String? _mpvAppliedFilter;
-
   /// Whether the volume gesture may run past 100% (Settings -> Audio ->
   /// Volume boost). When false the gesture is clamped to the stock 100% and
   /// this behaves exactly like any other player's volume swipe.
   bool _volumeBoostEnabled = false;
+
+  /// System volume when this video opened, and the last value the volume
+  /// gesture pushed. Both exist so a session cannot leave the phone's volume
+  /// changed: the gesture runs 0-200% and the top half raises the OS volume to
+  /// max on the way past 100%, which would otherwise stick for the whole
+  /// device. Restoring is skipped when the last pushed value no longer matches
+  /// what is actually set, because that means the user changed it themselves
+  /// (notification shade, headset keys) and clobbering that would be worse.
+  double? _systemVolumeAtOpen;
+  double? _lastPushedSystemVolume;
   bool _nightMode = false;
 
   int _subtitleDelayMs = 0;
@@ -574,6 +578,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         _playbackSpeed = await PlaybackSpeedStore.load();
         _subtitleStyle = await SubtitleStyle.load();
         _swipeEnabled = await areSwipeGesturesEnabled();
+        if (_swipeEnabled && Platform.isAndroid) {
+          // Best effort; a failure here just means nothing is restored, which
+          // is the same as the pre-session behaviour.
+          _systemVolumeAtOpen = await SystemControls.instance.getSystemVolume();
+        }
         _autoPlayNext = await isAutoPlayNextEnabled();
         _repeat = await PlaybackModesStore.loadRepeat();
         _shuffle = await PlaybackModesStore.loadShuffle();
@@ -1513,7 +1522,18 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _configureMpvAudio(Player player, {bool skipHwdec = false}) async {
     final platform = player.platform;
-    if (platform is! NativePlayer || _inTests) return;
+    if (platform is! NativePlayer || _inTests) {
+      // Logged rather than returned in silence. Every `setProperty` below is
+      // gated on this same check, so a failing test here means NO mpv option
+      // is being set at all — `volume-max` never rises above mpv's default of
+      // 100, and `af` is never touched. That is invisible from the outside:
+      // no exception, and our own logs cheerfully report the values we
+      // *asked* for rather than the ones mpv accepted.
+      debugPrint('mpv: _configureMpvAudio SKIPPED '
+          'platform=${platform.runtimeType} isNativePlayer='
+          '${platform is NativePlayer} inTests=$_inTests');
+      return;
+    }
     if (!skipHwdec) await _applyMpvHwdec(player);
     // Explicit OpenGL ES context + fast profile — required on some low-powered
     // MediaTek SoCs (G81 etc.) where mpv's auto-detection fails and the video
@@ -2925,42 +2945,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _applyMpvVolume({double? baseFraction}) async {
     final p = _mpvPlayer;
     if (p == null) return;
-    // The boost is NOT folded into mpv's `volume` any more (#41). On an
-    // `audiotrack` output mpv can apply volume natively at the output stage,
-    // AFTER the audio filter chain, which means a limiter placed as a filter
-    // could never catch it — the boost clipped instead of being limited.
-    // Filter-chain gain with an `alimiter` behind it is the only ordering that
-    // actually bounds the peaks.
     final vol = mpvVolumePercent(
       baseFraction: baseFraction ?? 1.0,
       boost: _audioBoost,
       nightMode: _nightMode,
     );
-    final filter = mpvBoostFilter(_audioBoost, nightMode: _nightMode);
-    final platform = p.platform;
-    final wanted = filter ?? '';
-    String? applied;
-    final changed = _mpvAppliedFilter != wanted;
     try {
       await p.setVolume(vol);
-      if (platform is NativePlayer && changed) {
-        await platform.setProperty('af', wanted);
-        // Read it back. A rejected or mis-tokenised `af` is NOT an exception —
-        // mpv just ends up with no filter — which is exactly how the boost
-        // silently did nothing on MPV while Media3 reached 200%. Logging the
-        // decision and the result, never just "we sent it".
-        applied = await platform.getProperty('af');
-        _mpvAppliedFilter = wanted;
-      }
     } catch (e) {
       debugPrint('mpv: volume apply failed: $e');
       return;
     }
     debugPrint(
-      'mpv: volume -> ${vol.toStringAsFixed(0)} base, '
-      'boost=${_audioBoost.toStringAsFixed(2)}${_nightMode ? ', night' : ''}, '
-      '${changed ? 'af set' : 'af unchanged'} '
-      'readback="${applied ?? '<unchanged>'}"',
+      'mpv: volume -> ${vol.toStringAsFixed(0)} '
+      '(base=${((baseFraction ?? 1.0) * 100).toStringAsFixed(0)}%, '
+      'boost=${_audioBoost.toStringAsFixed(2)}${_nightMode ? ', night' : ''})',
     );
   }
 
@@ -3837,6 +3836,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     unawaited(_restoreDecoderOverride());
     _saveResume(_position);
     _stopTranscodeJob();
+    unawaited(_restoreSystemVolumeAfterSession());
     // Restore system brightness so it doesn't stick after the player closes.
     // Media3 writes window brightness via the ExoPlayer channel; MPV writes the
     // SAME window attribute via SystemControls (dreamplayer/system). On the MPV
@@ -4106,10 +4106,43 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// gesture (and the on-screen percentage) back to 100% the moment they
   /// touched the screen, so the effective boost level wins whenever it is
   /// above what the system can report.
-  double _volumeSwipeBase(double systemVolume) {
-    if (_swipeType != _SwipeType.volume) return systemVolume.clamp(0.0, 1.0);
-    if (!_volumeBoostEnabled) return systemVolume.clamp(0.0, 1.0);
-    return _audioBoost.clamp(0.0, kMaxVolumeBoost);
+  double _volumeSwipeBase(double systemVolume) => volumeGestureBase(
+        systemVolume: systemVolume,
+        boost: _audioBoost,
+        boostEnabled: _volumeBoostEnabled,
+      );
+
+
+  /// Puts the system volume back where it was before this video opened.
+  ///
+  /// The volume gesture spans 0-200%, so pushing past 100% drags the OS volume
+  /// to max on the way. That must not outlive the session — the user asked for
+  /// volume to be video-scoped, not a device-wide side effect.
+  ///
+  /// Skipped when the last value the gesture pushed is no longer what is set,
+  /// because that means the volume was changed from outside the player while
+  /// watching and overwriting it would lose a deliberate change.
+  Future<void> _restoreSystemVolumeAfterSession() async {
+    final original = _systemVolumeAtOpen;
+    final pushed = _lastPushedSystemVolume;
+    _systemVolumeAtOpen = null;
+    _lastPushedSystemVolume = null;
+    if (original == null || pushed == null) return;
+    if (!Platform.isAndroid) return;
+    try {
+      final current = await SystemControls.instance.getSystemVolume();
+      if ((current - pushed).abs() > 0.02) {
+        debugPrint('volume: system volume changed outside the player '
+            '($pushed -> $current), not restoring $original');
+        return;
+      }
+      await SystemControls.instance.setSystemVolume(original);
+      debugPrint('volume: restored system volume to '
+          '${(original * 100).round()}% (was left at '
+          '${(pushed * 100).round()}%)');
+    } catch (e) {
+      debugPrint('volume: could not restore system volume: $e');
+    }
   }
 
   /// Computes base + accumulated delta, updates the overlay, and pushes the
@@ -4141,6 +4174,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       final split = splitVolume(next, boostEnabled: _volumeBoostEnabled);
       final boostChanged = split.boost != _audioBoost;
       _audioBoost = split.boost;
+      _lastPushedSystemVolume = split.system;
       if (_mpvReady) {
         // System volume on the mpv fallback too — same UX as Media3.
         unawaited(SystemControls.instance.setSystemVolume(split.system));
