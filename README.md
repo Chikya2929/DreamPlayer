@@ -17,6 +17,9 @@ A cross-platform video player for **Android, iOS/iPad, and Android TV** — buil
 
 🌐 **[dreamplayer website →](https://mangeshghodke.github.io/DreamPlayer/)** — features, codec support, screenshots and downloads in one place.
 
+> [!NOTE]
+> The website path is **case-sensitive**: `github.io/DreamPlayer/` works, `github.io/dreamplayer/` returns 404. Please copy the link rather than retyping it — and if you add it anywhere else in this repo, keep that exact capitalisation. `test/website_links_test.dart` enforces it.
+
 ## 📲 Now on the App Store
 
 **DreamPlayer is live on the App Store** — approved and available on iPhone and iPad.
