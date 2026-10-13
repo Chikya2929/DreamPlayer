@@ -7,12 +7,15 @@
 [![License: GPLv3](https://img.shields.io/github/license/mangeshghodke/DreamPlayer?style=flat)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS%20%7C%20iPad%20%7C%20Android%20TV-blue)](https://github.com/mangeshghodke/DreamPlayer)
 [![Flutter](https://img.shields.io/badge/Flutter-3.44-46A6F2?logo=flutter&logoColor=white&color=46A6F2)](https://flutter.dev)
+[![Website](https://img.shields.io/badge/Website-mangeshghodke.github.io-2D8CF0)](https://mangeshghodke.github.io/DreamPlayer/)
 [![Downloads](https://img.shields.io/github/downloads/mangeshghodke/DreamPlayer/total)](https://github.com/mangeshghodke/DreamPlayer/releases)
 [![App Store](https://img.shields.io/badge/App_Store-Download-0D96F2?logo=apple&logoColor=white)](https://apps.apple.com/in/app/dreamplayer-video-player/id6813066889)
 [![Donate](https://img.shields.io/badge/Donate-Razorpay-2D8CF0)](https://rzp.io/rzp/cZ5afqVG)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-Support-EA4AAA?logo=github&logoColor=white)](https://github.com/sponsors/mangeshghodke/)
 
 A cross-platform video player for **Android, iOS/iPad, and Android TV** — built for true Dolby Vision, HDR10/HDR10+, and lossless audio playback.
+
+🌐 **[dreamplayer website →](https://mangeshghodke.github.io/DreamPlayer/)** — features, codec support, screenshots and downloads in one place.
 
 ## 📲 Now on the App Store
 
@@ -413,6 +416,8 @@ state for it yet.
 | iOS / iPadOS | 17.0 |
 
 ## Download
+
+Full feature list, codec tables, screenshots and FAQs: **[mangeshghodke.github.io/DreamPlayer](https://mangeshghodke.github.io/DreamPlayer/)**
 
 ### iOS / iPadOS — [App Store](https://apps.apple.com/in/app/dreamplayer-video-player/id6813066889)
 
