@@ -130,6 +130,93 @@ void main() {
     });
   });
 
+  group('swipeStartBase', () {
+    // Regression for issue #41: a brightness swipe was being seeded with the
+    // VOLUME base, which returns the boost (2.0 at 200%) instead of the
+    // platform brightness. `_applySwipeValue` then clamps (base + delta) to
+    // 1.0, so brightness sat pinned at 100% for the whole gesture.
+    test('brightness is never seeded from the boost, however high it is', () {
+      for (final boost in [1.0, 1.01, 1.5, 2.0]) {
+        expect(
+          swipeStartBase(
+            isVolume: false,
+            platformValue: 0.4,
+            boost: boost,
+            boostEnabled: true,
+          ),
+          0.4,
+          reason: 'brightness base must stay the platform value at boost=$boost',
+        );
+      }
+    });
+
+    test('brightness stays on 0-1 even if the platform reports nonsense', () {
+      expect(
+        swipeStartBase(
+          isVolume: false,
+          platformValue: 2.0,
+          boost: 2.0,
+          boostEnabled: true,
+        ),
+        1.0,
+      );
+      expect(
+        swipeStartBase(
+          isVolume: false,
+          platformValue: -1.0,
+          boost: 2.0,
+          boostEnabled: true,
+        ),
+        0.0,
+      );
+    });
+
+    test('volume still uses the boosted base', () {
+      expect(
+        swipeStartBase(
+          isVolume: true,
+          platformValue: 0.3,
+          boost: 2.0,
+          boostEnabled: true,
+        ),
+        2.0,
+      );
+      expect(
+        swipeStartBase(
+          isVolume: true,
+          platformValue: 0.3,
+          boost: 2.0,
+          boostEnabled: false,
+        ),
+        0.3,
+      );
+    });
+
+    // The bug only bit because base+delta is clamped to the axis ceiling.
+    // Reproduce the actual failure: a downward drag must still darken.
+    test('a downward brightness drag lowers brightness below 100%', () {
+      double applyBrightness(double base, double delta) =>
+          (base + delta).clamp(0.0, 1.0);
+
+      final fixed = swipeStartBase(
+        isVolume: false,
+        platformValue: 1.0,
+        boost: 2.0,
+        boostEnabled: true,
+      );
+      expect(applyBrightness(fixed, -0.4), 0.6);
+
+      // What the old code computed: volume logic applied to brightness.
+      final broken = volumeGestureBase(
+        systemVolume: 1.0,
+        boost: 2.0,
+        boostEnabled: true,
+      );
+      expect(applyBrightness(broken, -0.4), 1.0,
+          reason: 'the old base pinned brightness at 100%');
+    });
+  });
+
   group('mpvVolumePercent', () {
     test('no boost is just the system volume', () {
       expect(mpvVolumePercent(baseFraction: 1.0, boost: 1.0, nightMode: false), 100);

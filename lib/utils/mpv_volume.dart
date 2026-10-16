@@ -162,3 +162,28 @@ VolumeSplit splitVolume(double level, {required bool boostEnabled}) {
 /// Gesture ceiling: 200% with boost on, 100% with it off.
 double volumeCeiling({required bool boostEnabled}) =>
     boostEnabled ? kMaxVolumeBoost : kMaxVolumeNoBoost;
+
+/// The value a NEW swipe gesture starts from, for either axis.
+///
+/// Volume runs on the 0-200% boosted scale, so its base has to come from
+/// [volumeGestureBase]. Brightness is always the raw platform value on 0-1.
+///
+/// The two must be selected by axis, not applied to both: piping a brightness
+/// reading through [volumeGestureBase] returns the *boost* whenever boost is
+/// above 1.0, which seeds the gesture at 2.0. Since the brightness axis then
+/// clamps `(base + delta)` to 1.0, brightness is pinned at 100% for the whole
+/// gesture no matter how far you drag down (issue #41: "when volume boost is
+/// set to 200%, brightness is locked at 100%").
+double swipeStartBase({
+  required bool isVolume,
+  required double platformValue,
+  required double boost,
+  required bool boostEnabled,
+}) {
+  if (!isVolume) return platformValue.clamp(0.0, kMaxVolumeNoBoost);
+  return volumeGestureBase(
+    systemVolume: platformValue,
+    boost: boost,
+    boostEnabled: boostEnabled,
+  );
+}

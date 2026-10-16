@@ -4077,7 +4077,12 @@ class _PlayerScreenState extends State<PlayerScreen>
           : await SystemControls.instance.getSystemVolume();
       if (!mounted || !_swipeGestureActive) return;
       setState(() {
-        _swipeBase = _volumeSwipeBase(current);
+        _swipeBase = swipeStartBase(
+          isVolume: _swipeType == _SwipeType.volume,
+          platformValue: current,
+          boost: _audioBoost,
+          boostEnabled: _volumeBoostEnabled,
+        );
         _applySwipeValue();
       });
       return;
@@ -4090,28 +4095,19 @@ class _PlayerScreenState extends State<PlayerScreen>
           : await exo.getSystemVolume();
       if (!mounted || !_swipeGestureActive) return;
       setState(() {
-        _swipeBase = _volumeSwipeBase(current);
+        _swipeBase = swipeStartBase(
+          isVolume: _swipeType == _SwipeType.volume,
+          platformValue: current,
+          boost: _audioBoost,
+          boostEnabled: _volumeBoostEnabled,
+        );
         _applySwipeValue();
       });
     } catch (_) {
       // Platform read failed; fall back to applying buffered deltas from 0.
-      if (mounted) setState(_applySwipeValue);
+if (mounted) setState(_applySwipeValue);
     }
   }
-
-  /// The value the volume gesture starts from.
-  ///
-  /// The system only reports 0-100%, but when boost is on the user may have
-  /// left the volume at 150%. Seeding from the raw system value would snap the
-  /// gesture (and the on-screen percentage) back to 100% the moment they
-  /// touched the screen, so the effective boost level wins whenever it is
-  /// above what the system can report.
-  double _volumeSwipeBase(double systemVolume) => volumeGestureBase(
-        systemVolume: systemVolume,
-        boost: _audioBoost,
-        boostEnabled: _volumeBoostEnabled,
-      );
-
 
   /// Puts the system volume back where it was before this video opened.
   ///
