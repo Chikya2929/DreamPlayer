@@ -326,6 +326,36 @@ def check_structure():
     pbx = open(PBXPROJ, encoding="utf-8").read()
     if pbx.count("{") != pbx.count("}"):
         fail("project.pbxproj: unbalanced braces")
+
+    # Structural ID integrity. Xcode object IDs are 24 uppercase hex chars, and
+    # every one that is referenced must also be DEFINED. A hand-added entry
+    # whose ID is mistyped still looks registered to the textual check below --
+    # the `/* ChapterProbe.swift in Sources */` comment is still there -- so
+    # that check passes while Xcode silently drops the entry, the file never
+    # enters Sources, and the build fails with "Cannot find 'ChapterProbe' in
+    # scope" (iOS signed build for 0.5.2). This repo had a PBXBuildFile keyed
+    # A1B2C3D5000000000001B (21 chars) against a Sources entry keyed
+    # A1B2C3D5000000000000001B (24): two different strings, so the phase
+    # pointed at an object that did not exist.
+    #
+    # Resolving the ID chain rather than matching comments is the whole point:
+    # comment text survives the typo, the ID does not.
+    defined = set(re.findall(
+        r"^\s*([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", pbx, re.M))
+    for oid in sorted(set(re.findall(r"\b([A-F0-9]{24})\b", pbx))):
+        if oid not in defined:
+            fail(f"project.pbxproj references object {oid}, which is never "
+                 f"defined — a mistyped object ID is dropped silently by Xcode, "
+                 f"so whatever it registers never compiles (seen as "
+                 f"'Cannot find <type> in scope')")
+
+    # Every PBXBuildFile must point at a real file reference.
+    for bid, fref in re.findall(
+            r"^\s*([A-F0-9]{24})\s*/\*.*?\*/\s*=\s*\{\s*isa\s*=\s*"
+            r"PBXBuildFile;\s*fileRef\s*=\s*([A-F0-9]{24})", pbx, re.M):
+        if fref not in defined:
+            fail(f"project.pbxproj: PBXBuildFile {bid} points at file "
+                 f"reference {fref}, which is never defined")
     # `path = X` in a pbxproj is relative to its enclosing *group* (the Runner
     # group has `path = Runner`), so exact resolution needs group parsing.
     # Matching on basename anywhere under ios/ catches the failure that matters —
