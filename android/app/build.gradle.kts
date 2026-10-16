@@ -79,8 +79,8 @@ android {
         // The SHIPPED number is not this value verbatim. `flutter build apk
         // --split-per-abi` applies Flutter's per-ABI scheme
         // (FlutterPlugin.kt: `abiVersionCode * 1000 + base`, ARCH_ARM64 -> 2),
-        // so as of v0.5.1 the published codes are:
-        //     universal 40   |   arm64-v8a 2040
+        // so as of v0.5.2 the published codes are:
+        //     universal 41   |   arm64-v8a 2041
         // Read the real one off an APK with:
         //     aapt2 dump badging <apk> | grep versionCode
         //
@@ -89,8 +89,8 @@ android {
         // build -- Android reads the lower code as a downgrade and refuses.
         // Pick one flavour per user and stay on it (issue #43).
         //
-        // Last published: v0.5.1 -> universal 40 / arm64 2040.
-        versionCode = 41
+        // Last published: v0.5.2 -> universal 41 | arm64-v8a 2041.
+        versionCode = 42
         versionName = flutter.versionName
     }
 

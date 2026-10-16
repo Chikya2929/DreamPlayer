@@ -3,25 +3,7 @@
 All notable changes to DreamPlayer are documented here. Each release's entry is
 pulled into the GitHub Release body automatically by `.github/workflows/release.yml`.
 
-## Unreleased
-
-### Fixed
-
-- **Volume boost is smooth instead of crushing the mix (issue #41).** The
-  reported symptom was "background music plays, but the vocals/dialogue become
-  inaudible or disappear entirely" — the signature of over-compression rather
-  than a level or downmix fault. Volume boost asked Android's
-  `LoudnessEnhancer` for up to 15 dB of make-up gain; that class is a *fixed*
-  compressor the app cannot tune, it has no limiter, its behaviour varies by
-  vendor, and a real Android player measured it clipping audibly from about
-  6 dB. Make-up gain lifted everything, the loudest material (music, bass, LFE)
-  hit the ceiling first, and the compressor pulled gain back by as much as the
-  loudest band demanded — applied to the whole mix. Dialogue sits mid-level in
-  the centre channel, so it was dragged down while the distorted music survived
-  and read as "louder". Boost now runs through `DynamicsProcessing`: a
-  compressor (2:1 above −20 dBFS) followed by a limiter at −1 dBFS, so peaks are
-  limited instead of clipped and a high boost gets denser rather than harsher.
-  `LoudnessEnhancer` is kept only as a fallback on older Android versions.
+## 0.5.3
 
 ### Changed
 
@@ -104,8 +86,6 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   redundant there. Works on Android and iPhone/iPad; hidden on TV, which has no
   launcher.
 
-### Changed
-
 - **Settings → Metadata is now a single decision.** The provider selector moved
   to the top of the section and is drawn as one outlined box divided into three
   equal cells, and only the selected provider's credential field is shown
@@ -120,6 +100,22 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   browse screens.
 
 ### Fixed
+
+- **Volume boost is smooth instead of crushing the mix (issue #41).** The
+  reported symptom was "background music plays, but the vocals/dialogue become
+  inaudible or disappear entirely" — the signature of over-compression rather
+  than a level or downmix fault. Volume boost asked Android's
+  `LoudnessEnhancer` for up to 15 dB of make-up gain; that class is a *fixed*
+  compressor the app cannot tune, it has no limiter, its behaviour varies by
+  vendor, and a real Android player measured it clipping audibly from about
+  6 dB. Make-up gain lifted everything, the loudest material (music, bass, LFE)
+  hit the ceiling first, and the compressor pulled gain back by as much as the
+  loudest band demanded — applied to the whole mix. Dialogue sits mid-level in
+  the centre channel, so it was dragged down while the distorted music survived
+  and read as "louder". Boost now runs through `DynamicsProcessing`: a
+  compressor (2:1 above −20 dBFS) followed by a limiter at −1 dBFS, so peaks are
+  limited instead of clipped and a high boost gets denser rather than harsher.
+  `LoudnessEnhancer` is kept only as a fallback on older Android versions.
 
 - **Metadata provider selector could clip or wrap.** "TheTVDB" did not fit as a
   `SegmentedButton` segment on a narrow phone, and a row of separate chips
