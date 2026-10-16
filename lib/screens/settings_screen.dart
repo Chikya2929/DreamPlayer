@@ -2373,7 +2373,11 @@ class _LayoutSection extends StatelessWidget {
                 // boolean as every other one, so existing subscribers already
                 // have it and get this immediately. Android is untouched —
                 // `Entitlements.advanced` is unconditionally true there.
-                if (!isTvMode(context))
+                // `supported` is false on an iPad: UIKit refuses
+                // `setAlternateIconName` there with "Could not change icon on
+                // this device" for every variant, so the control is hidden
+                // instead of offering a switch that can only fail.
+                if (!isTvMode(context) && AppIconService.instance.supported)
                   ListenableBuilder(
                     listenable: AppIconService.instance,
                     builder: (context, _) {

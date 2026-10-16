@@ -25,6 +25,13 @@ final class IconSwitcher {
         )
         channel.setMethodCallHandler { call, result in
             switch call.method {
+            case "isSupported":
+                // Alternate app icons are iPhone-only. UIKit refuses the call
+                // on iPad and hands back UIErrorAlternateIconUnavailable,
+                // whose localizedDescription is "Could not change icon on this
+                // device" -- so the Dart side hides the control rather than
+                // offering a switch that can only ever fail.
+                result(UIDevice.current.userInterfaceIdiom != .pad)
             case "currentVariant":
                 // The system already knows; asking it avoids a second source
                 // of truth that could drift from what is actually on screen.
