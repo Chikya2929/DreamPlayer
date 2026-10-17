@@ -79,6 +79,15 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   than a fake one. Its homepage used to look dead (an ISP redirect page) and
   resolve IPv6-only; that is no longer true, and no IPv4 workaround is needed.
 
+- **Folders on USB drives and SD cards can be added to your library from the
+  browser (issue #50).** After issue #48 made removable volumes visible, they
+  were browsable but unreachable: the only route into the library was Home's
+  "Add folder to library", which opens the system folder picker — a separate
+  detour with no link to the folder you were looking at. Browsing a 12 TB drive
+  ended there, so nothing appeared on Home and nothing was looked up. The
+  folder currently open can now be added straight from the browser's app bar,
+  and it expands into cards exactly like a local folder.
+
 - **Search AVDb by ID, and say what AVDb actually covers (issue #49).** A report
   that adult titles returned no matches turned out to be three separate things,
   only one of which was a code gap. Searching by the numeric catalogue ID now

@@ -5,10 +5,13 @@ import 'package:flutter/services.dart';
 import '../models/video_item.dart';
 import '../services/download_manager.dart';
 import '../services/file_browser.dart';
+import '../services/folder_scanner.dart';
+import '../services/library_folders.dart';
 import '../services/tmdb_client.dart';
 import '../services/resume_progress_helper.dart';
 import '../services/watched_store.dart';
 import '../utils/file_info_extractor.dart';
+import '../utils/storage_path.dart';
 import '../widgets/tv_overscan.dart';
 import '../widgets/episode_row.dart';
 import '../widgets/tv_tile.dart';
@@ -34,6 +37,10 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
   bool _loading = true;
   bool _hasAccess = true;
   String? _error;
+
+  /// A scan is running for the "Add to library" action; disables the button so
+  /// a 12 TB drive is not walked twice.
+  bool _addingToLibrary = false;
 
   /// Watched marks for the current folder, keyed by each file's stable resume
   /// key for playback.
@@ -459,6 +466,63 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
     _service.openAllFilesAccessSettings();
   }
 
+  /// Adds the folder currently open in this browser to the library.
+  ///
+  /// Issue #50. USB drives were visible and fully browsable (issue #48), but the
+  /// only route into the library was the home screen's "Add folder to library",
+  /// which opens the SAF picker -- a separate detour with no connection to the
+  /// folder you were just looking at. A reporter browsing a 12 TB drive had no
+  /// way to turn what they were seeing into a library card, so nothing appeared
+  /// on home and nothing reached TMDB.
+  ///
+  /// Storage roots are real absolute paths (`/storage/<uuid>`), which is the
+  /// same identity [FileBrowserService] already browses, so the card is built
+  /// from the current path directly. Scanning is the shared [FolderScanner], so a
+  /// USB folder expands exactly like a local one and resolution then goes
+  /// through the normal TMDB path like any other card.
+  Future<void> _addCurrentFolderToLibrary() async {
+    final path = _currentPath;
+    if (path == null || _addingToLibrary) return;
+    // Internal storage already has a route (Home -> + -> Add folder to library),
+    // and adding the same folder both ways would produce two cards for it.
+    if (isInternalStorage(path)) {
+      _toast('Use Home -> + -> Add folder to library for internal storage.');
+      return;
+    }
+    setState(() => _addingToLibrary = true);
+    try {
+      final name =
+          path.split('/').lastWhere((s) => s.isNotEmpty, orElse: () => path);
+      final root = LibraryFolder(
+        id: 'folder_${DateTime.now().millisecondsSinceEpoch}',
+        name: name,
+        path: path,
+        addedAt: DateTime.now(),
+      );
+      final scanner =
+          FolderScanner(maxDepth: await FolderScanner.savedScanDepth());
+      final expanded = await scanner.scan(root);
+      final added = expanded.isNotEmpty ? expanded : [root];
+      await LibraryFoldersStore.bulkAdd(added);
+      await LibraryFoldersStore.saveScanRoot(root);
+      if (!mounted) return;
+      _toast(added.length == 1
+          ? 'Added "$name" to your library.'
+          : 'Added "$name" as ${added.length} library cards.');
+    } catch (e) {
+      if (!mounted) return;
+      _toast('Could not add this folder: $e');
+    } finally {
+      if (mounted) setState(() => _addingToLibrary = false);
+    }
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -478,6 +542,22 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
           onPressed: _selectionActive ? _clearSelection : _goUp,
         ),
         actions: [
+          // Issue #50: the folder you are looking at becomes the library card.
+          // Without this, a USB volume was browsable but unreachable from the
+          // library, and nothing about the screen hinted the SAF detour.
+          if (!_selectionActive && !_atRoot)
+            IconButton(
+              key: const ValueKey('addCurrentFolderToLibrary'),
+              tooltip: 'Add this folder to library',
+              icon: _addingToLibrary
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.library_add_outlined),
+              onPressed: _addingToLibrary ? null : _addCurrentFolderToLibrary,
+            ),
           if (_selectionActive) ...[
             Padding(
               padding: const EdgeInsets.only(right: 4),

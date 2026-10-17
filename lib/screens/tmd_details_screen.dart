@@ -30,6 +30,7 @@ import '../services/download_manager.dart';
 import '../services/entitlements.dart';
 import '../utils/codec_info.dart';
 import '../utils/file_info_extractor.dart';
+import '../utils/storage_path.dart';
 import '../utils/season_group.dart' as sg;
 import '../widgets/season_progress_ring.dart';
 import '../widgets/tmdb_fix_match_dialog.dart';
@@ -1540,23 +1541,10 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
 
   /// True when the file lives outside the device's internal storage.
   ///
-  /// Internal storage mounts at `/storage/emulated/...`; removable volumes get
-  /// a UUID mount point instead (`/storage/1A2B-3C4D/...`). Judging by the
-  /// mount point rather than a flag is deliberate: `Environment.isExternal-
-  /// StorageManager()` says nothing about WHICH volume, and asking Dart for
-  /// that per file would be a round trip for something the path already tells
-  /// us. Unmounted/unknown paths (a SAF `content://` URI) count as NOT
-  /// removable, so the button does not appear for something we cannot copy.
-  bool get _isOnRemovableStorage {
-    final path = widget.video?.path;
-    if (path == null || path.isEmpty) return false;
-    if (path.startsWith('content://') || path.startsWith('tree:')) return false;
-    if (!path.startsWith('/storage/') && !path.startsWith('/sdcard/')) {
-      return false;
-    }
-    return !path.startsWith('/storage/emulated/') &&
-        !path.startsWith('/storage/self/');
-  }
+  /// The mount-point rule lives in [isOnRemovableStorage] because the file
+  /// browser needs the same answer (issue #50).
+  bool get _isOnRemovableStorage =>
+      isOnRemovableStorage(widget.video?.path);
 
   bool get _isDownloaded {
     final video = widget.video;
