@@ -49,6 +49,17 @@ object DynamicsBoost {
     /// Compressor: anything above -20 dBFS is squeezed 2:1 so the make-up gain
     /// downstream has somewhere to go before the ceiling.
     private const val COMP_THRESHOLD_DB = -20f
+
+    /**
+     * Band counts tried for the two (disabled) EQ stages, most-lenient first.
+     *
+     * Non-zero is tried before zero because several vendor HALs answer
+     * bandCount = 0 with BAD_VALUE even when the stage is not in use, which
+     * fails the whole DynamicsProcessing construction and drops the app onto
+     * the LoudnessEnhancer fallback (issue #41). Zero stays in the list so a
+     * stricter platform that insists on it still works.
+     */
+    private val BAND_COUNTS = intArrayOf(1, 0)
     private const val COMP_RATIO = 2f
     private const val COMP_ATTACK_MS = 10f
     private const val COMP_RELEASE_MS = 200f
@@ -83,23 +94,46 @@ object DynamicsBoost {
         if (boostDb <= 0.01f) return null
         // Try the real layout first, then the two common fallbacks. A mono or
         // odd layout is more likely to reject 2 or 6 than the other way round.
-        val candidates = buildList {
+        val channelCandidates = buildList {
             if (channelCount > 0) add(channelCount)
             add(2)
             add(6)
         }.distinct()
-        for (channels in candidates) {
-            val effect = build(sessionId, boostDb, channels) ?: continue
-            if (isLive(effect)) {
-                Log.i(TAG, "attached boost=${boostDb}dB ch=$channels session=$sessionId")
-                return effect
-            }
-            Log.w(TAG, "effect not initialised for ch=$channels")
-            try {
-                effect.release()
-            } catch (_: Exception) {
+        // Band-count ladder, issue #41. Some vendor HALs reject bandCount = 0
+        // with BAD_VALUE even for a stage that is not in use, surfacing as
+        // "IllegalArgumentException: AudioEffect: bad parameter value" from the
+        // DynamicsProcessing constructor. On a OnePlus Pad 2 that rejected both
+        // ch=6 and ch=2, so EVERY attempt failed and the app silently fell
+        // back to LoudnessEnhancer -- the exact component removed in 0.5.2
+        // because it crushes dialogue out of the mix. Reporting that fallback
+        // is what identified it.
+        //
+        // A non-zero band count on a disabled stage is harmless: the stage stays
+        // off via inUse, it simply allocates no working bands. So try the safe
+        // non-zero counts first and keep the original zeroes as a last resort.
+        for (bands in BAND_COUNTS) {
+            for (channels in channelCandidates) {
+                val effect = build(sessionId, boostDb, channels, bands) ?: continue
+                if (isLive(effect)) {
+                    Log.i(
+                        TAG,
+                        "attached boost=${boostDb}dB ch=$channels bands=$bands session=$sessionId"
+                    )
+                    return effect
+                }
+                Log.w(TAG, "effect not initialised for ch=$channels bands=$bands")
+                try {
+                    effect.release()
+                } catch (_: Exception) {
+                }
             }
         }
+        Log.w(
+            TAG,
+            "could not attach DynamicsProcessing for boost=${boostDb}dB " +
+                "after trying channels=$channelCandidates bands=$BAND_COUNTS; " +
+                "caller will fall back"
+        )
         return null
     }
 
@@ -112,16 +146,26 @@ object DynamicsBoost {
         false
     }
 
-    private fun build(sessionId: Int, boostDb: Float, channels: Int): DynamicsProcessing? {
+    private fun build(
+        sessionId: Int,
+        boostDb: Float,
+        channels: Int,
+        bands: Int,
+    ): DynamicsProcessing? {
         return try {
             // variant, channel count, usePreEq/preEqBands, useMbc/mbcBands,
             // usePostEq/postEqBands, useLimiter.
+            //
+            // `bands` is applied to BOTH EQ stages even though they are disabled.
+            // That looks redundant but is deliberate: passing 0 is what some
+            // HALs reject outright, and it is the whole reason the effect never
+            // attached. See attach().
             val config = DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_TIME_RESOLUTION,
                 channels,
-                false, 0,
+                false, bands,
                 true, 1,
-                false, 0,
+                false, bands,
                 true,
             ).build()
 

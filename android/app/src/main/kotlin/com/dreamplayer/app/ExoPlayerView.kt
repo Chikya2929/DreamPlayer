@@ -306,14 +306,23 @@ class ExoPlayerView(
             // giving the user no boost at all.
         }
 
-        // Fallback: API < 28, or a vendor with no DynamicsProcessing. This is
-        // the old, known-clipping behaviour but it is better than silence.
+        // Fallback: API < 28, or a vendor whose HAL refused every
+        // DynamicsProcessing config. This is the old, known-clipping behaviour
+        // and it is what crushes dialogue out of the mix, so it must never be
+        // silent: a OnePlus Pad 2 failed every attempt in 0.5.2 and the only
+        // clue was one Log.w buried in a logcat (issue #41). Warn loudly, and
+        // say what to look for.
         try {
             val enhancer = LoudnessEnhancer(sessionId)
             enhancer.setTargetGain((cappedDb * 100).toInt().coerceIn(0, 1500))
             enhancer.enabled = true
             loudnessEnhancer = enhancer
-            Log.w("ExoPlayerView", "using LoudnessEnhancer fallback at ${cappedDb}dB")
+            Log.w(
+                "ExoPlayerView",
+                "FALLING BACK to LoudnessEnhancer at ${cappedDb}dB -- dialogue may " +
+                    "vanish above 100% boost on speakers. Expected 'attached boost=' " +
+                    "from DynamicsBoost. See issue #41."
+            )
         } catch (e: Exception) {
             Log.w("ExoPlayerView", "LoudnessEnhancer failed", e)
         }
