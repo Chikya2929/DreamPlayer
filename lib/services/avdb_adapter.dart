@@ -110,7 +110,21 @@ class AvdbAdapter extends MetadataProviderAdapter {
 
     Uri uri;
     try {
-      uri = Uri.parse('$baseUrl?ac=detail&wd=${Uri.encodeQueryComponent(term)}');
+      // Issue #49: AVDb has no title-unique search that covers everything, and
+      // a user who knows the catalog code or the numeric id is the most precise
+      // input available. Both were probed live against avdbapi.com and both work
+      // on this endpoint:
+      //   ids=604629  -> exactly 1 record (the movie's own id)
+      //   wd=MIAA-818 -> 1 record (its movie_code)
+      // `wd` already matches `name`, `tag`/`category` and `movie_code`, and
+      // `origin_name` differs from `name` only by a bracket prefix such as
+      // [UNCENSORED-LEAK], so original-title search is already covered -- there
+      // is no separate parameter to add for it. Only the id lookup was missing,
+      // because `details()` is the only thing that used `ids=` until now.
+      final id = int.tryParse(term);
+      uri = id != null && id > 0
+          ? Uri.parse('$baseUrl?ac=detail&ids=$id')
+          : Uri.parse('$baseUrl?ac=detail&wd=${Uri.encodeQueryComponent(term)}');
     } on FormatException {
       return const [];
     }

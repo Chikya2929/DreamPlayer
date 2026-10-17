@@ -76,8 +76,20 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   reached through a new pluggable `MetadataProviderAdapter` seam, so a third
   provider no longer means teaching the whole app about another schema. AVDb is
   movie-only and carries no ratings, so it never produces a star rating rather
-  than a fake one. Note that its homepage looks dead (an ISP redirect page) and
-  resolves IPv6-only; forcing IPv4 works.
+  than a fake one. Its homepage used to look dead (an ISP redirect page) and
+  resolve IPv6-only; that is no longer true, and no IPv4 workaround is needed.
+
+- **Search AVDb by ID, and say what AVDb actually covers (issue #49).** A report
+  that adult titles returned no matches turned out to be three separate things,
+  only one of which was a code gap. Searching by the numeric catalogue ID now
+  works (`search()` routes a positive integer to `ids=`, which returns exactly
+  that record) alongside the existing title search — measured live against the
+  API, not assumed. Name, original title and tag/alias search all worked
+  already, so nothing was added for them. The Settings switch now says
+  "Japanese adult video" and mentions searching by code or ID: AVDb is a JAV
+  catalogue, so mainstream studio titles legitimately return nothing from it,
+  and the switch is off by default, which is the other reason a fresh install
+  sees no matches.
 
 - **Choose the app icon (issue #23).** Settings → Appearance → **App icon** now
   offers five launcher icons: the original logo + wordmark, the logo on its own,

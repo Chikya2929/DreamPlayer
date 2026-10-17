@@ -163,6 +163,53 @@ void main() {
       expect(seen!.queryParameters['ac'], 'detail');
       expect(seen!.queryParameters['wd'], 'miaa 818');
     });
+
+    // Issue #49: a user who knows the numeric id is the most precise input
+    // there is. Probed live -- `ids=604629` returns exactly one record, while
+    // the title of that same record is not reliably reachable through `wd`.
+    group('id search', () {
+      Future<Uri?> capture(String query) async {
+        Uri? seen;
+        final adapter = AvdbAdapter(transport: (uri) async {
+          seen = uri;
+          return _decode(detailEnvelope);
+        });
+        await adapter.search(query);
+        return seen;
+      }
+
+      test('a numeric query uses ids= rather than wd=', () async {
+        final uri = await capture('604629');
+        expect(uri!.queryParameters['ids'], '604629');
+        expect(uri.queryParameters.containsKey('wd'), isFalse);
+      });
+
+      test('a non-numeric query still uses wd=', () async {
+        final uri = await capture('miaa-818');
+        expect(uri!.queryParameters['wd'], 'miaa-818');
+        expect(uri.queryParameters.containsKey('ids'), isFalse);
+      });
+
+      test('whitespace around an id is tolerated', () async {
+        final uri = await capture('  604629  ');
+        expect(uri!.queryParameters['ids'], '604629');
+      });
+
+      test('zero and negatives are not treated as ids', () async {
+        // 0 and -1 are meaningless ids, and sending them would replace a title
+        // search the user actually meant with a lookup that cannot exist.
+        expect((await capture('0'))!.queryParameters['wd'], '0');
+        expect((await capture('-5'))!.queryParameters['wd'], '-5');
+      });
+
+      test('a numeric code like a movie id is not misread', () async {
+        // Codes such as "118abp00123" are non-numeric, but a purely numeric
+        // one would legitimately be an id -- so this asserts the documented
+        // behaviour rather than pretending the ambiguity does not exist.
+        final uri = await capture('12345');
+        expect(uri!.queryParameters['ids'], '12345');
+      });
+    });
   });
 
   group('AVDb details', () {

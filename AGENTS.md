@@ -80,8 +80,11 @@ A video player app supporting:
     offering it, and the existing test `providerOrderFor` covers the
     unconfigured case as defence in depth.
   - **AVDb (`lib/services/avdb_adapter.dart`)** — verified live before writing:
-    `avdbapi.com` LOOKS dead (the bare domain serves an ISP redirect page) and
-    resolves **IPv6-only**; forcing IPv4 works. It is free, needs **no key**, and
+    `avdbapi.com` used to LOOK dead (the bare domain serves an ISP redirect
+    page) and resolve **IPv6-only**. **Both are stale as of 2026-10-17**: it is
+    now behind Cloudflare with normal A *and* AAAA records, and a default
+    dual-stack request returns HTTP 200 — do not re-add `-4`/IPv6 workarounds.
+    It is free, needs **no key**, and
     speaks the Maccms `provide/vod` shape. **Its two endpoints are not uniform:**
     `ac=list` returns NO `poster_url`/`thumb_url`/`description`, while
     `ac=detail&wd=` returns everything — so `search()` fetches a DETAIL
@@ -90,6 +93,22 @@ A video player app supporting:
     ratings**, so `voteAverage` stays 0 and rows show no star rather than a
     fake score. `time` is a DURATION (`"01:58:34"`); the release date is
     `created_at`/`vod_pubdate`. Reading one as the other is a wrong runtime.
+    **Field names are NOT standard Maccms** on this deployment: it returns
+    `name` (not `vod_name`) and `origin_name` (not `vod_sub`) — `parseMovie`
+    reads `name` then falls back to `origin_name`. Measured live for #49:
+    `wd=` matches `name`, `tag`/`category` AND `movie_code`
+    (`wd=MIAA-818` → 1, `wd=Solowork` → 1000), so original-title and alias
+    search already work — `origin_name` differs from `name` only by a bracket
+    prefix such as `[UNCENSORED-LEAK]`, so there is **no separate parameter**
+    to add for them. Only `ids=` was missing, so `search()` now routes a
+    positive integer to `ids=` (`ids=604629` → exactly 1 record). **Do not
+    report "AVDb title search is broken" from a `startswith()` probe**: names
+    carry `[UNCENSORED-LEAK]`/`[ENGLISH-SUBTITLE]` prefixes, so a startswith
+    check reports false misses (this happened during #49).
+    **`total` is unreliable — it reports 999 even for a query with zero
+    results**, so never paginate off it. And it is a **JAV (Japanese adult
+    video) catalogue**: `wd=The Matrix` → 0, correctly. A user reporting "no
+    matches for adult titles" is usually hitting that scope, not a bug.
   - **`AvdbAdapter` is a SINGLETON (`AvdbAdapter.instance`)** because the
     enabled flag is cached. Settings used to build a fresh instance per call
     while the registry held its own, so toggling wrote the preference but the

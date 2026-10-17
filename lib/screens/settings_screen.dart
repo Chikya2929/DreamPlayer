@@ -1606,7 +1606,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                        SwitchListTile(
                          secondary: const Icon(Icons.extension),
                          title: const Text('Enable AVDb'),
-                         subtitle: const Text('No API key needed'),
+                         // Issue #49: the reporter could not get matches for
+                         // adult titles and had no way to know why. Two
+                         // reasons, and only one was ever visible: the switch
+                         // is off by default, and AVDb is a Japanese adult
+                         // video catalogue, so mainstream studio titles return
+                         // nothing from it no matter how it is configured.
+                         subtitle: const Text(
+                             'No key needed · Japanese adult video · '
+                             'search by name, code or ID'),
                          value: _avdbEnabled,
                          onChanged: _setAvdbEnabled,
                        )
