@@ -87,6 +87,17 @@ jobs:
           security default-keychain -s $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
+      - name: Probe actool alternate app icons
+        # Diagnostic only -- never fails the build. The shipped IPA has no
+        # CFBundleAlternateIcons and its Assets.car holds only "AppIcon", while
+        # the repository looks correct by every Linux-side check. Running
+        # actool directly settles in seconds whether the CATALOG is wrong or
+        # the build SETTINGS never reach actool, which a 13-minute build cycle
+        # cannot distinguish. See tool/probe_actool_icons.sh.
+        run: |
+          chmod +x tool/probe_actool_icons.sh
+          tool/probe_actool_icons.sh || echo "::warning::actool probe failed or alternates missing -- see tool/verify_ipa_icons.py for the IPA-side gate"
+
       - name: Compile libsmb2 (static arm64 archive)
         # Must run before any Xcode build: project.pbxproj links
         # Runner/libsmb2/build/libsmb2.a by path, and that archive is generated
