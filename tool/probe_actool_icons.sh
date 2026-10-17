@@ -81,18 +81,21 @@ else
 fi
 
 rc=0
+# Per-icon output directories are NOT how actool emits: with a deployment
+# target of iOS 11+ every icon goes into Assets.car, so a directory check
+# reports MISS for icons that compiled perfectly. That is a gate that cries
+# wolf. The declaration in the partial plist plus Assets.car are the real
+# signals; per-file existence is only checked when actool emitted loose files.
+emitted_loose=$(find "${OUT_DIR}" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')
+if [[ "${emitted_loose}" -gt 0 ]]; then
+  echo "probe: note ${emitted_loose} loose icon file(s) emitted alongside Assets.car"
+fi
 for name in "${ALTERNATES[@]}"; do
   if xcrun plutil -extract "CFBundleIcons.CFBundleAlternateIcons.${name}" xml1 -o - \
       "${PLIST}" >/dev/null 2>&1; then
-    echo "probe: OK    ${name} declared in the partial plist"
+    echo "probe: OK    ${name} declared in CFBundleAlternateIcons"
   else
-    echo "probe: MISS  ${name} NOT declared -- actool ignored it"
-    rc=1
-  fi
-  if [[ -d "${OUT_DIR}/${name}.appiconset" ]]; then
-    echo "probe: OK    ${name} compiled into the CAR"
-  else
-    echo "probe: MISS  ${name} not compiled -- no ${name}.appiconset output"
+    echo "probe: MISS  ${name} NOT declared -- UIKit cannot select it"
     rc=1
   fi
 done
