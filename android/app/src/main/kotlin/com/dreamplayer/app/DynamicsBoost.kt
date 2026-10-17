@@ -76,7 +76,54 @@ object DynamicsBoost {
     /// code: dropping it would crash on Android 7/8 devices, the same trap
     /// already recorded for `SurfaceControl.Transaction.setDataSpace` and
     /// `setDesiredHdrHeadroom`.
-    val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+
+    /**
+     * An attached effect plus the [DynamicsProcessing.Config] that shaped it.
+     *
+     * The config is retained so the make-up gain can be moved WITHOUT
+     * releasing and re-attaching the effect. Rebuilding on every change restarts
+     * the compressor's envelope follower at zero, so gain reduction never
+     * accumulates; the result is that the chain audibly changes behaviour the
+     * moment you stop moving a control (issue #41: dialogue returned while
+     * dragging the volume gesture and vanished ~1.5 s after release, which is
+     * exactly the 200 ms release plus settling of a chain that was only ever
+     * given the chance to act in the frames between rebuilds).
+     *
+     * `setMbcBandAllChannelsTo` updates the LIVE native effect, so moving the
+     * gain here is a parameter write, not a reinitialisation.
+     */
+    class Chain internal constructor(
+        val effect: DynamicsProcessing,
+        private val config: DynamicsProcessing.Config,
+        private val channels: Int,
+        private val bands: Int,
+    ) {
+        /** True when this chain's shape still fits a (re)build request. */
+        fun matches(channels: Int, bands: Int): Boolean =
+            this.channels == channels && this.bands == bands
+
+        /** Move the make-up gain in place. Returns false if the write failed. */
+        fun setBoostDb(boostDb: Float): Boolean = try {
+            val band = config.getMbcBandByChannelIndex(0, 0)
+            band.setPostGain(boostDb)
+            config.setMbcBandAllChannelsTo(0, band)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "in-place boost update to ${boostDb}dB failed", e)
+            false
+        } catch (e: LinkageError) {
+            Log.w(TAG, "in-place boost update to ${boostDb}dB linkage failed", e)
+            false
+        }
+
+        fun release() {
+            try {
+                effect.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     /// Attach a boost of [boostDb] dB to [sessionId], or return null so the
     /// caller can fall back to `LoudnessEnhancer`.
@@ -89,7 +136,7 @@ object DynamicsBoost {
     /// effect is not initialised. NOT `getStatus()`: that method is absent from
     /// the android-37 stub, the same gap AGENTS.md records for
     /// `HdrCapabilities.isHdrSupported`, so referencing it would not compile.
-    fun attach(sessionId: Int, boostDb: Float, channelCount: Int): DynamicsProcessing? {
+    fun attach(sessionId: Int, boostDb: Float, channelCount: Int): Chain? {
         if (!supported) return null
         if (boostDb <= 0.01f) return null
         // Try the real layout first, then the two common fallbacks. A mono or
@@ -100,7 +147,7 @@ object DynamicsBoost {
             add(6)
         }.distinct()
         // Band-count ladder, issue #41. Some vendor HALs reject bandCount = 0
-        // with BAD_VALUE even for a stage that is not in use, surfacing as
+        // with BAD_VALUE even when a stage is not in use, surfacing as
         // "IllegalArgumentException: AudioEffect: bad parameter value" from the
         // DynamicsProcessing constructor. On a OnePlus Pad 2 that rejected both
         // ch=6 and ch=2, so EVERY attempt failed and the app silently fell
@@ -113,19 +160,16 @@ object DynamicsBoost {
         // non-zero counts first and keep the original zeroes as a last resort.
         for (bands in BAND_COUNTS) {
             for (channels in channelCandidates) {
-                val effect = build(sessionId, boostDb, channels, bands) ?: continue
-                if (isLive(effect)) {
+                val built = build(sessionId, boostDb, channels, bands) ?: continue
+                if (isLive(built.effect)) {
                     Log.i(
                         TAG,
                         "attached boost=${boostDb}dB ch=$channels bands=$bands session=$sessionId"
                     )
-                    return effect
+                    return built
                 }
                 Log.w(TAG, "effect not initialised for ch=$channels bands=$bands")
-                try {
-                    effect.release()
-                } catch (_: Exception) {
-                }
+                built.release()
             }
         }
         Log.w(
@@ -151,7 +195,7 @@ object DynamicsBoost {
         boostDb: Float,
         channels: Int,
         bands: Int,
-    ): DynamicsProcessing? {
+    ): Chain? {
         return try {
             // variant, channel count, usePreEq/preEqBands, useMbc/mbcBands,
             // usePostEq/postEqBands, useLimiter.
@@ -198,7 +242,9 @@ object DynamicsBoost {
             // stays at unity: one gain stage, in one place.
             config.setInputGainAllChannelsTo(0f)
 
-            DynamicsProcessing(0, sessionId, config).apply { setEnabled(true) }
+            val effect = DynamicsProcessing(0, sessionId, config)
+            effect.setEnabled(true)
+            Chain(effect, config, channels, bands)
         } catch (e: Exception) {
             Log.w(TAG, "build failed for ch=$channels", e)
             null

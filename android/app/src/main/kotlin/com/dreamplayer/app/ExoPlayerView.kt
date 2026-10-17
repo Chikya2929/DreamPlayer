@@ -125,7 +125,7 @@ class ExoPlayerView(
     private var loudnessEnhancer: LoudnessEnhancer? = null
     /// Preferred boost path (#41). A real compressor+limiter; see
     /// DynamicsBoost. Falls back to [loudnessEnhancer] when unavailable.
-    private var dynamicsBoost: DynamicsProcessing? = null
+    private var boostChain: DynamicsBoost.Chain? = null
     /// Volume boost is SESSION state, never restored.
     ///
     /// It used to be seeded from `flutter.dreamplayer.audioBoost`, which this
@@ -262,9 +262,35 @@ class ExoPlayerView(
         } catch (_: Exception) {}
     }
 
+    /** Boost in dB for the current [audioBoost] + [nightModeEnabled], capped. */
+    private fun currentBoostDb(): Float {
+        val boostDb = (20f * kotlin.math.log10(audioBoost.toDouble()).toFloat()) +
+                (if (nightModeEnabled) 4f else 0f)
+        return boostDb.coerceIn(0f, 12f)
+    }
+
+    /**
+     * Move the make-up gain on the live chain instead of rebuilding it.
+     *
+     * Returns false when there is no usable chain, or when the in-place write
+     * fails, so the caller falls back to [applyAudioEffects]. Bass boost and the
+     * loudness fallback are deliberately left alone: they do not depend on the
+     * boost value and rebuilding them per gesture frame would be pure cost.
+     */
+    private fun updateBoostInPlace(): Boolean {
+        val chain = boostChain ?: return false
+        if (audioBoost <= 1.0f && !nightModeEnabled) return false
+        if (!chain.setBoostDb(currentBoostDb())) {
+            chain.release()
+            boostChain = null
+            return false
+        }
+        return true
+    }
+
     private fun applyAudioEffects() {
-        try { dynamicsBoost?.release() } catch (_: Exception) {}
-        dynamicsBoost = null
+        boostChain?.release()
+        boostChain = null
         try { loudnessEnhancer?.release() } catch (_: Exception) {}
         loudnessEnhancer = null
         try { bassBoostFx?.release() } catch (_: Exception) {}
@@ -288,9 +314,7 @@ class ExoPlayerView(
         // Boost in dB. Capped at +12 dB: the limiter makes higher values
         // denser rather than louder, and past this point a movie mix has no
         // headroom left to give.
-        val boostDb = (20f * kotlin.math.log10(audioBoost.toDouble()).toFloat()) +
-                (if (nightModeEnabled) 4f else 0f)
-        val cappedDb = boostDb.coerceIn(0f, 12f)
+        val cappedDb = currentBoostDb()
 
         // Preferred path: real compressor + limiter (issue #41 — the old
         // LoudnessEnhancer path clipped audibly well below this gain and
@@ -299,7 +323,7 @@ class ExoPlayerView(
             val channels = player.audioFormat?.channelCount ?: 2
             val attached = DynamicsBoost.attach(sessionId, cappedDb, channels)
             if (attached != null) {
-                dynamicsBoost = attached
+                boostChain = attached
                 return
             }
             // Fell through deliberately: fall back rather than silently
@@ -1696,7 +1720,15 @@ class ExoPlayerView(
                 "setAudioBoost" -> {
                     val boost = call.argument<Number>("boost")?.toFloat() ?: 1.0f
                     audioBoost = boost.coerceIn(1.0f, 2.0f)
-                    applyAudioEffects()
+                    // Gesture-rate path: the volume gesture pushes a new value
+                    // on every frame it changes, so a full rebuild here would
+                    // release and re-attach the whole effect chain dozens of
+                    // times per second. That restarts the compressor's envelope
+                    // follower each time, so gain reduction never accumulates and
+                    // the chain only ever acts in the gaps between rebuilds --
+                    // audible as the boost behaving differently the moment you
+                    // lift your finger (issue #41). Move the gain instead.
+                    if (!updateBoostInPlace()) applyAudioEffects()
                     emit()
                     result.success(null)
                 }
@@ -2664,8 +2696,8 @@ class ExoPlayerView(
         stopPositionTicker()
         unregisterSpatialListener()
         PlaybackManager.release(activity)
-        try { dynamicsBoost?.release() } catch (_: Exception) {}
-        dynamicsBoost = null
+        boostChain?.release()
+        boostChain = null
         try { loudnessEnhancer?.release() } catch (_: Exception) {}
         loudnessEnhancer = null
         try { bassBoostFx?.release() } catch (_: Exception) {}
