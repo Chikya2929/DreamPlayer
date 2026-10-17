@@ -43,9 +43,13 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-# Must match AppIconVariant in ios/Runner/IconSwitcher.swift and
-# ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES in project.pbxproj.
-DEFAULT_EXPECTED = ("mark", "red", "green", "cyan")
+# The CFBundleAlternateIcons KEYS are the asset-catalog set names, i.e.
+# "AppIcon<Variant>". Those are what ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES
+# lists and what AppIconVariant rawValue carries in IconSwitcher.swift. They are
+# NOT the wire names Dart sends ("mark"), which are mapped to these on the
+# native side -- comparing the plist against wire names reports a healthy build
+# as broken.
+DEFAULT_EXPECTED = ("AppIconMark", "AppIconRed", "AppIconGreen", "AppIconCyan")
 
 
 def find_app(root: Path) -> Path:
@@ -103,30 +107,34 @@ def main() -> int:
         problems: list[str] = []
 
         # ---- 1. CFBundleAlternateIcons, the key UIKit actually reads -------
+        # CFBundleAlternateIcons is NESTED under CFBundleIcons -- it is not a
+        # top-level key. Reading it at the top level always yields None and
+        # reports every build as broken, which is how this script cried wolf.
+        # iPad needs the same set under CFBundleIcons~ipad; a build can be fine
+        # on iPhone and dead on iPad.
         with (app / "Info.plist").open("rb") as fh:
             plist = plistlib.load(fh)
-        alt = plist.get("CFBundleAlternateIcons") or {}
-        present = sorted(alt)
-        print(f"Info.plist CFBundleAlternateIcons: {present or 'ABSENT'}")
 
-        for name in expected:
-            entry = alt.get(name)
-            if not entry:
-                problems.append(
-                    f"CFBundleAlternateIcons has no entry for {name!r} -- "
-                    f"UIKit will refuse setAlternateIconName({name!r})"
-                )
-                continue
-            files = entry.get("CFBundleIconFiles") or []
-            print(f"  {name:<8} -> {files}")
-            if not files:
-                problems.append(f"{name!r} is declared but lists no icon files")
+        def alternates(container_key: str) -> dict:
+            container = (plist.get(container_key) or {}).get("CFBundleAlternateIcons") or {}
+            return container
 
-        # The ipad-suffixed key is a separate dictionary; alternates must not be
-        # stranded there or iPhone reads nothing.
-        ipad_alt = plist.get("CFBundleAlternateIcons~ipad") or {}
-        if ipad_alt:
-            print(f"Info.plist CFBundleAlternateIcons~ipad: {sorted(ipad_alt)}")
+        problems: list[str] = []
+        for container_key in ("CFBundleIcons", "CFBundleIcons~ipad"):
+            alt = alternates(container_key)
+            print(f"{container_key} CFBundleAlternateIcons: {sorted(alt) or 'ABSENT'}")
+            for name in expected:
+                entry = alt.get(name)
+                if not entry:
+                    problems.append(
+                        f"{container_key} has no entry for {name!r} -- UIKit "
+                        f"cannot select it"
+                    )
+                    continue
+                files = entry.get("CFBundleIconFiles") or entry.get("CFBundleIconName") or []
+                print(f"  {name:<8} -> {files}")
+                if not files and not entry.get("CFBundleIconName"):
+                    problems.append(f"{name!r} is declared but names no icon")
 
         # ---- 2. Assets.car, proving actool actually compiled them ----------
         car = app / "Assets.car"

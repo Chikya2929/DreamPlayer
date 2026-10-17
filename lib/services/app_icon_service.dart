@@ -86,19 +86,9 @@ class AppIconService extends ChangeNotifier {
   AppIconStyle _style = AppIconStyle.defaultIcon;
   AppIconStyle get style => _style;
 
+  bool get _isAndroid => !kIsWeb && Platform.isAndroid;
   bool get _isIOS => !kIsWeb && Platform.isIOS;
-
-  /// Whether this DEVICE can actually switch launcher icons.
-  ///
-  /// Android and iPhone always can. iPad never can: `setAlternateIconName`
-  /// fails with `UIErrorAlternateIconUnavailable` ("Could not change icon on
-  /// this device") no matter which variant is requested, so the control is
-  /// hidden rather than shown as a switch that always fails.
-  ///
-  /// Starts optimistic per platform and is corrected from the native side in
-  /// [load], so the tile does not flash in and out on first frame.
-  bool _supported = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-  bool get supported => _supported;
+  bool get _supported => _isAndroid || _isIOS;
 
   static const MethodChannel _channel = MethodChannel(channel);
 
@@ -109,25 +99,6 @@ class AppIconService extends ChangeNotifier {
   /// interrupted, so the native state wins and the pref is corrected.
   Future<void> load() async {
     if (!_supported) return;
-
-    // Ask the platform first: on iOS only the device knows, and an iPad
-    // answers false because UIKit will not switch icons there at all.
-    if (_isIOS) {
-      try {
-        final ok = await _channel.invokeMethod<bool>('isSupported');
-        if (ok != null && ok != _supported) {
-          _supported = ok;
-          notifyListeners();
-        }
-        if (!_supported) return;
-      } on PlatformException {
-        // Fall through: a platform that cannot answer is not proof it cannot
-        // switch, so keep the optimistic default rather than hiding a control
-        // that may well work.
-      } on MissingPluginException {
-        // Same reasoning.
-      }
-    }
 
     String? variant;
     try {
