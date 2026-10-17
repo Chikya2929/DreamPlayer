@@ -10,6 +10,7 @@ import '../models/video_item.dart';
 import 'adult_content_store.dart';
 import 'artwork_override.dart';
 import 'image_cache_service.dart';
+import 'metadata_provider_adapter.dart';
 import 'the_tvdb_client.dart';
 
 String? metadataImageUrl(String? value, {int width = 780}) {
@@ -2728,17 +2729,29 @@ class TmdService extends ChangeNotifier {
   Future<TmdMatch?> _matchInProviderOrder({
     required Future<TmdMatch?> Function() tmdb,
     required Future<TmdMatch?> Function() theTvdb,
+    required Future<TmdMatch?> Function() external,
   }) async {
+    // Issue #46 part 2 / #49: an external adapter is only usable when at least
+    // one has registered AND is enabled. It was never passed here, so external
+    // mode silently degraded to the TMDB/TheTVDB order -- and even had it
+    // reached the loop, `external` fell into the theTvdb branch below, meaning
+    // selecting AVDb returned TheTVDB results. AVDb was never queried at all.
+    final adapters = await MetadataProviderRegistry.instance.configured();
     final order = providerOrderFor(
       choice: await TheTvdbClient.providerChoice(),
       tmdbConfigured: (await _api.effectiveApiKey()).isNotEmpty,
       theTvdbConfigured: await _theTvdb.isConfiguredAsync,
       theTvdbFallbackEnabled: await TheTvdbClient.isFallbackEnabled(),
+      externalConfigured: adapters.isNotEmpty,
     );
     for (final provider in order) {
       try {
-        final match =
-            provider == MetadataProvider.tmdb ? await tmdb() : await theTvdb();
+        final match = switch (provider) {
+          MetadataProvider.tmdb => await tmdb(),
+          MetadataProvider.theTvdb => await theTvdb(),
+          MetadataProvider.external =>
+            adapters.isEmpty ? null : await external(),
+        };
         if (match != null) return match;
       } catch (_) {
         // Try the next provider rather than failing the whole resolve.
@@ -2747,7 +2760,78 @@ class TmdService extends ChangeNotifier {
     return null;
   }
 
-  static int? _trailingPartNumber(String folderName) {
+  /// Resolve a parsed filename through whichever external adapter is enabled.
+///
+/// The seam existed and was registered, but nothing ever called into it
+/// (issue #49), so this is the first path that actually reaches an adapter.
+Future<TmdMatch?> _externalBestMatch(ParsedFileName parsed) async {
+  for (final adapter in await MetadataProviderRegistry.instance.configured()) {
+    try {
+      final match = await adapter.bestMatch(parsed);
+      if (match != null) return match;
+    } catch (_) {
+      // Try the next adapter rather than failing the whole resolve.
+    }
+  }
+  return null;
+}
+
+/// Resolve a free-text query (a folder or season name) through the adapters.
+///
+/// `preferMovie` and the sequel/part patterns are TMDB-specific and have no
+/// external equivalent, so they are not forwarded. A single-film catalogue
+/// resolves a TV-shaped query to nothing rather than inventing a season.
+Future<TmdMatch?> _externalBestForQuery(
+  String query, {
+  int? year,
+  bool preferMovie = false,
+}) async {
+  final term = query.trim();
+  if (term.isEmpty) return null;
+  for (final adapter in await MetadataProviderRegistry.instance.configured()) {
+    try {
+      final hits = await adapter.search(term, kind: TmdKind.movie);
+      if (hits.isEmpty) continue;
+      final wanted = _normaliseTitle(term);
+      TmdMovie? best;
+      var bestScore = 0.0;
+      for (final hit in hits) {
+        final candidate = _normaliseTitle(hit.title);
+        var score = candidate == wanted
+            ? 1.0
+            : (candidate.contains(wanted) || wanted.contains(candidate) ? 0.8 : 0.0);
+        // A catalogue with no year field cannot corroborate a year match, but a
+        // hit carrying the right year is still a better answer than one that
+        // does not.
+        if (score > 0 && year != null && hit.year == year) score += 0.05;
+        if (score > bestScore) {
+          bestScore = score;
+          best = hit;
+        }
+      }
+      if (best == null) continue;
+      final details = await adapter.details(best);
+      return TmdMatch(
+        TmdMovie(
+          id: best.id,
+          title: best.title,
+          year: best.year,
+          posterPath: details?.posterPath ?? best.posterPath,
+          overview: details?.overview ?? best.overview,
+          kind: TmdKind.movie,
+          provider: best.provider,
+          originalTitle: best.originalTitle,
+        ),
+        bestScore,
+      );
+    } catch (_) {
+      // Next adapter.
+    }
+  }
+  return null;
+}
+
+static int? _trailingPartNumber(String folderName) {
     final stripped = folderName.replaceAll(RegExp(r'\[[^\]]*\]'), ' ');
     final m = RegExp(r'\b(\d{1,3})\s*$').firstMatch(stripped.trim());
     if (m == null) return null;
@@ -3120,6 +3204,7 @@ class TmdService extends ChangeNotifier {
     final match = await _matchInProviderOrder(
       tmdb: () => _api.bestMatch(parsed),
       theTvdb: () => _theTvdb.bestMatch(parsed),
+      external: () => _externalBestMatch(parsed),
     );
     if (match == null) {
       return null;
@@ -3565,6 +3650,11 @@ class TmdService extends ChangeNotifier {
         preferMovie: preferMovie,
         hasMovieSequelPattern: hasMovieSequelPattern,
         desiredPart: desiredPart,
+      ),
+      external: () => _externalBestForQuery(
+        query,
+        year: year,
+        preferMovie: preferMovie,
       ),
     );
     if (match == null) return null;

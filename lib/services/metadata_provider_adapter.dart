@@ -60,6 +60,75 @@ abstract class MetadataProviderAdapter {
   /// Per-episode detail, including stills and cast where available.
   Future<TmdEpisode?> episode(TmdMovie movie, int season, int episode) =>
       Future.value(null);
+
+  /// Resolve a parsed filename to a confident match, or null to fall through.
+  ///
+  /// Mirrors `TheTvdbClient.bestMatch` so the resolution loop can treat an
+  /// adapter exactly like a built-in provider. Built from [search] plus
+  /// [details] and defaulted rather than abstract, so a key-less adapter is
+  /// still only `search` + `details`.
+  ///
+  /// Scoring is deliberately simple: the adapter's catalogue is the only one in
+  /// play here, so the first exact-or-contained title match wins. A catalogue
+  /// that needs real ranking should override this rather than pushing the work
+  /// into every caller.
+  Future<TmdMatch?> bestMatch(ParsedFileName parsed) async {
+    if (!await isConfigured()) return null;
+    final hasSeries =
+        parsed.isEpisode || (parsed.seriesName?.trim().isNotEmpty ?? false);
+    // A single-film catalogue has no notion of a season, so an episode-shaped
+    // filename is still matched as a film rather than being rejected outright.
+    final query = _queryFor(parsed, hasSeries: hasSeries);
+    if (query.isEmpty) return null;
+
+    final hits = await search(query, kind: TmdKind.movie);
+    if (hits.isEmpty) return null;
+
+    final wanted = _normaliseTitle(query);
+    TmdMovie? best;
+    var bestScore = 0.0;
+    for (final hit in hits) {
+      final candidate = _normaliseTitle(hit.title);
+      final score = candidate == wanted
+          ? 1.0
+          : (candidate.contains(wanted) || wanted.contains(candidate) ? 0.8 : 0.0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = hit;
+      }
+    }
+    if (best == null) return null;
+
+    final fetched = await details(best);
+    return TmdMatch(
+      TmdMovie(
+        id: best.id,
+        title: best.title,
+        year: best.year,
+        posterPath: fetched?.posterPath ?? best.posterPath,
+        overview: fetched?.overview ?? best.overview,
+        kind: TmdKind.movie,
+        provider: best.provider,
+        originalTitle: best.originalTitle,
+      ),
+      bestScore,
+    );
+  }
+
+  static String _queryFor(ParsedFileName parsed, {required bool hasSeries}) {
+    var q = (hasSeries ? (parsed.seriesName ?? parsed.title) : parsed.title).trim();
+    // Trailing code/ID the catalogue indexes separately. Querying for it as
+    // text returns nothing, so a pure number is sent as `ids=` by `search`.
+    if (RegExp(r'^\d+$').hasMatch(q)) return q;
+    q = q.replaceAll(RegExp(r'\[[^\]]*\]'), ' ').trim();
+    return q;
+  }
+
+  /// Lowercase, punctuation-insensitive, so "MIAA-818" == "Miaa 818".
+  static String _normaliseTitle(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .trim();
 }
 
 /// Registry of [MetadataProviderAdapter] implementations.
