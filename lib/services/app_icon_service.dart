@@ -152,6 +152,12 @@ class AppIconService extends ChangeNotifier {
   /// Applies [style] to the launcher. Returns false if the platform refused.
   Future<bool> apply(AppIconStyle style) async {
     if (!_supported) return false;
+    // Calling setAlternateIconName when the icon is already the requested one
+    // still fires a mandatory system alert ("You have changed the icon for
+    // ..."). iOS gives no way to suppress it, so the only defence is not making
+    // the call. `_style` is reconciled with the platform in load(), so this is
+    // the live icon and not just a stored preference.
+    if (style == _style) return true;
     try {
       await _channel.invokeMethod<bool>('applyVariant', {
         'variant': style.nativeName,
