@@ -50,6 +50,7 @@ import '../services/system_controls.dart';
 import 'subtitle_settings_screen.dart';
 import 'opensubtitles_sheet.dart';
 import '../utils/codec_info.dart';
+import '../utils/vc1_codec.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
 import '../widgets/format_chip.dart';
@@ -325,6 +326,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// is recreated on unlock) so [didChangeAppLifecycleState] can detect that
   /// the media was lost and reopen it.
   bool _hadMedia = false;
+
+  /// Latches the VC-1 warning so it is offered at most once per open
+  /// (issue #51). The position event fires ~4x/s, so an unlatched check would
+  /// re-show the SnackBar continuously. Reset in [_openCurrent].
+  bool _vc1Warned = false;
   String? _error;
 
   bool _dragging = false;
@@ -691,6 +697,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _autoPlayFired = false;
     _autoFetchFired = false;
     _readingAutoSelected = false;
+    _vc1Warned = false;
     // TMDB title for the top bar — cache hit when the home screen
     // pre-fetched this file; a miss resolves fire-and-forget (intent-opened
     // files never hit the home prefetch).
@@ -943,7 +950,39 @@ class _PlayerScreenState extends State<PlayerScreen>
     unawaited(_startMpvFallback(automatic: false));
   }
 
-  /// Sets a terminal backend error. Media3 does NOT auto-fallback to mpv
+  /// Offers the MPV engine when Media3 reports VC-1 (issue #51).
+///
+/// Advisory only — it never switches engines on its own and never blocks
+/// playback. [Platform.isIOS] is excluded because mpv is Android-only, so on
+/// iOS there is nothing to offer and the warning would be noise.
+Future<void> _offerVc1Mpv() async {
+  if (_inTests || !Platform.isAndroid || !mounted) return;
+  // Nothing to hand off to if this source has no mpv-readable URI.
+  if (_mpvSourceFor(_current).isEmpty) return;
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  final advanced = isVc1AdvancedProfile(_liveVideoCodecRaw) ||
+      isVc1AdvancedProfile(_liveVideoMimeRaw);
+  debugPrint('vc1: detected${advanced ? ' Advanced' : ''} — offering MPV '
+      '(codecs=$_liveVideoCodecRaw mime=$_liveVideoMimeRaw)');
+  messenger.showSnackBar(
+    SnackBar(
+      duration: const Duration(seconds: 12),
+      content: Text(
+        advanced
+            ? 'VC-1 Advanced has no hardware or Media3 software decoder on '
+                'Android, so this track may show black. Play it with MPV.'
+            : 'VC-1 may show black on the default engine. Play it with MPV.',
+      ),
+      action: SnackBarAction(
+        label: 'Play with MPV',
+        onPressed: () => unawaited(_startMpvManual()),
+      ),
+    ),
+  );
+}
+
+/// Sets a terminal backend error. Media3 does NOT auto-fallback to mpv
   /// anymore — the error surface shows a "Try with MPV" button instead, and
   /// the details screen offers both engines up front.
   void _setTerminalError(String message) {
@@ -3281,6 +3320,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (e.videoMime != null && e.videoMime!.isNotEmpty) {
       _liveVideoMimeRaw = e.videoMime;
+    }
+    // Issue #51: VC-1 (Advanced especially) is advertised by the platform
+    // decoder, initialises, then emits nothing WITHOUT erroring — so the
+    // error-triggered software fallback never fires and the user gets a
+    // silent black screen with working audio. There is no Media3-path
+    // software decoder for it (Media3's FFmpeg extension is audio-only;
+    // nextlib's video renderer claims avc/hevc), but libmpv ships full
+    // FFmpeg. So: explain, and offer the engine that works.
+    if (!_vc1Warned &&
+        !_mpvActive &&
+        shouldWarnVc1(codecs: _liveVideoCodecRaw, mime: _liveVideoMimeRaw)) {
+      _vc1Warned = true;
+      unawaited(_offerVc1Mpv());
     }
     final newHdr = detectMedia3HdrFormat(
       colorTransfer: e.colorTransfer,
