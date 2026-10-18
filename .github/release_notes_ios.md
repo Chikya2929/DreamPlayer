@@ -20,6 +20,33 @@ platform and carried engine/implementation detail.
   Android-only. If it is not visible or reachable on iOS, it does not go here.
 - Lead with user-visible behaviour, one line per change, ~4000 character cap.
 
+## Which build each section describes
+
+A section must only claim what is **actually in that build**, not what is on
+`main`. TestFlight 43 is commit `9d75ae3`; anything committed after that
+(AVDb search-by-ID, the external-provider wiring, adding USB folders to the
+library) is in a later build and belongs in the *next* section.
+
+An earlier draft of this file advertised chapter markers in 0.5.1, which was
+true of the intended build but not of the one that was reviewed. Verify with
+`git log <build-commit>..main` before writing a section, not `git log v0.5.1..main`.
+
+---
+
+## 0.5.2
+
+• **Choose your app icon.** Settings → Appearance → App icon now offers five
+  launcher icons on iPhone and iPad: the original logo and wordmark, the logo on
+  its own, and the logo in red, green or cyan. Pick one and it applies straight
+  away — no reinstall. The wordmark-only logo is handy when your device already
+  prints the app name underneath the icon.
+
+• Fixed a problem that could stop the icon picker from opening on smaller
+  screens.
+
+• The file browser no longer offers a Delete option on iPhone and iPad, where it
+  had no effect.
+
 ---
 
 ## 0.5.1
