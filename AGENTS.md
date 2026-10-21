@@ -2160,6 +2160,68 @@ never locked out after an update, and `isEntitledTransaction` checking
 revocation *before* expiry. The signal worth watching instead is refunds and
 reviews mentioning "locked"/"paywall" — redownloads alone are weak evidence.
 
+### Restore was a cache read — the missing `AppStore.sync()` (build 48, 2026-10-21)
+
+Reported as "restore says *No previous purchase found* even though I own the
+lifetime", and it was **not** a gate-map or entitlement-logic bug: the log
+showed `Transaction.all` / `currentEntitlements` returning **zero
+transactions** while the three products loaded and priced fine.
+
+**Cause.** `in_app_purchase_storekit` 0.4.12
+(`.../StoreKit2/InAppPurchasePlugin+StoreKit2.swift:285 restorePurchases`)
+only enumerates `Transaction.currentEntitlements` and delivers whatever it
+finds through `sendTransactionUpdates`. It **never calls `AppStore.sync()`**.
+That enumeration is a *local cache read*, and the cache is empty after a
+reinstall, after StoreKit's cache is reset (an OS update), or while the device
+is signed in with a **different** account than the one that bought — so
+"Restore Purchases" reports nothing even though the account owns the product.
+The launch-time `refreshEntitlements()` has the same limitation by design
+(Apple: never `sync()` automatically), which is why an inactive user can look
+entitled-less at launch on a reinstall.
+
+**Fix.** A `syncPurchases` case on the **existing `dreamplayer/trial`
+channel** (`ios/Runner/TrialStore.swift`) calling `AppStore.sync()`, exposed to
+Dart as `TrialStore.syncPurchasesWithAppStore()`. `Entitlements.restorePurchases()`
+calls it *first*, then the plugin restore, then `refreshEntitlements(force: true)`.
+`sync()` is also what prompts for the owning Apple ID when the device is signed
+in with a different one — exactly the TestFlight case that produced the empty
+list. It is invoked from the `Task` and its `FlutterResult` is returned via
+`await MainActor.run`, because a `FlutterResult` invoked off the main thread
+deadlocks the method channel (same rule as the SMB status probe).
+
+**Verified on-device, build 48 (`iap_debug.log`):**
+
+```
+[INIT] ... trialStartedAt=1789882401957, isAdvanced=false, isEntitled=false
+[ENTITLE] tx product=dp_premium_lifetime_2026 env=Sandbox expiration=null revocation=null
+[ENTITLE] restored existing purchase: dp_premium_lifetime_2026
+```
+
+Paywall gone, premium unlocked. **Note there was no `[RESTORE] AppStore.sync()`
+line in that log** — it succeeded at launch, because once the account and
+environment resolve, `Transaction.all` is populated. So the absence of a sync
+line means *nobody tapped Restore*, not that sync is broken; read the
+`ENTITLE tx … env=` line instead.
+
+**Two things worth keeping:**
+
+- **Zero transactions is an account/environment fact, not app state.**
+  TestFlight runs StoreKit **Sandbox** and the live App Store build runs
+  **Production** — separate transaction histories that cannot see each other.
+  The decisive check is tapping the product: a purchase sheet means the current
+  identity does not own it, "You're all set"/already-purchased means it does.
+  Sandbox history also disappears if the sandbox tester is deleted or its
+  purchase history is cleared in App Store Connect.
+- **`iap_debug.log` interleaves.** `IapLog.log()` appends from concurrent call
+  sites, so lines arrive torn (`on=null`, `tion=…`). Treat a missing or partial
+  line as unreliable and judge from the `env=` field, not from line count.
+
+The method lives in `TrialStore.swift` for one reason: that file already owns
+the `dreamplayer/trial` channel, and a second Swift channel for a single method
+would need another registration in `AppDelegate` (and another
+`ios_native_check.py`/pbxproj concern). It is unrelated to the trial, and that
+is deliberate.
+
 ### Competitor-gap roadmap, phased (2026-08)
 
 Gap analysis vs Infuse / Just Player / Nova / VLC produced a phased plan. Later
