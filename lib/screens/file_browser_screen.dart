@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -499,9 +500,32 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
         path: path,
         addedAt: DateTime.now(),
       );
+
+      // Respect Settings -> "Auto-expand folders". This path used to scan
+      // unconditionally, so turning the toggle OFF had no effect on a USB
+      // bookmark while it did work from Home -> + -> Add folder. Adding the
+      // root alone (no parentId) is also what keeps the refresh rescan away
+      // from it: LocalLibraryRescan only reconciles children of a scan root,
+      // and a scan root is deliberately NOT recorded here — recording one
+      // would let a pull-to-refresh fan the folder back out into N cards.
+      if (!await LibraryFoldersStore.isAutoExpandEnabled()) {
+        // bulkAdd (not add) keeps the path-level dedupe this screen had
+        // before: every attempt mints a fresh timestamp id, so `add` alone
+        // would let the same USB folder stack up as duplicate cards.
+        await LibraryFoldersStore.bulkAdd([root]);
+        if (!mounted) return;
+        _toast('Added "$name" to your library.');
+        return;
+      }
+
       final scanner =
           FolderScanner(maxDepth: await FolderScanner.savedScanDepth());
-      final expanded = await scanner.scan(root);
+      final expanded = await _scanWithProgress(scanner, root);
+      if (scanner.cancel) {
+        if (!mounted) return;
+        _toast('Scan cancelled — nothing was added.');
+        return;
+      }
       final added = expanded.isNotEmpty ? expanded : [root];
       await LibraryFoldersStore.bulkAdd(added);
       await LibraryFoldersStore.saveScanRoot(root);
@@ -514,6 +538,35 @@ class _FileBrowserScreenState extends State<FileBrowserScreen>
       _toast('Could not add this folder: $e');
     } finally {
       if (mounted) setState(() => _addingToLibrary = false);
+    }
+  }
+
+  /// Runs [scanner] behind a blocking progress overlay with a Cancel button.
+  ///
+  /// A USB volume can hold a very large tree, and the scan is one directory
+  /// listing at a time, so waiting on it silently (the old behaviour: a
+  /// disabled AppBar button) looked like a hang. [FolderScanner] already
+  /// exposes [FolderScanner.scannedDirs] and [FolderScanner.cancel]; this is
+  /// only the UI that was missing.
+  ///
+  /// The overlay owns its own timer and reads the scanner directly, so there
+  /// is no notifier to dispose while an overlay entry is still mounted.
+  Future<List<LibraryFolder>> _scanWithProgress(
+    FolderScanner scanner,
+    LibraryFolder root,
+  ) async {
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final entry = OverlayEntry(
+      builder: (_) => _ScanProgressOverlay(scanner: scanner),
+    );
+    overlay.insert(entry);
+    try {
+      return await scanner.scan(root);
+    } finally {
+      // NOT gated on `entry.mounted`: that only becomes true once the entry's
+      // widget has been built (a later frame), so a fast scan would skip the
+      // removal and leave the overlay up forever.
+      entry.remove();
     }
   }
 
@@ -912,6 +965,97 @@ class _FileTile extends StatelessWidget {
       // The watch toggle is meaningless mid-selection; the row tap and the
       // overflow do the work then.
       showTrailingActions: !selectionActive,
+    );
+  }
+}
+
+/// Blocking scan progress for "Add this folder to library".
+///
+/// Reads [scanner] directly on a timer rather than receiving pushed updates,
+/// so the [FolderScanner] keeps owning all scan state and this widget owns
+/// only its own ticker.
+class _ScanProgressOverlay extends StatefulWidget {
+  const _ScanProgressOverlay({required this.scanner});
+
+  final FolderScanner scanner;
+
+  @override
+  State<_ScanProgressOverlay> createState() => _ScanProgressOverlayState();
+}
+
+class _ScanProgressOverlayState extends State<_ScanProgressOverlay> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    // scannedDirs is mutated by the scan, so poll rather than listen. 250 ms
+    // is fast enough to look live without rebuilding the overlay on every
+    // directory (a big drive can list thousands).
+    _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scanned = widget.scanner.scannedDirs;
+    final failed = widget.scanner.failedDirs;
+    return Stack(
+      children: [
+        const ModalBarrier(dismissible: false, color: Colors.black54),
+        Center(
+          child: Card(
+            margin: const EdgeInsets.all(32),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Scanning folders…'),
+                  const SizedBox(height: 6),
+                  Text(
+                    scanned == 1 ? '1 folder checked' : '$scanned folders checked',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (failed > 0) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      failed == 1
+                          ? '1 folder could not be read'
+                          : '$failed folders could not be read',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Text(
+                    'Large drives can take a while.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    key: const ValueKey('cancelLibraryScan'),
+                    onPressed: () => widget.scanner.cancel = true,
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

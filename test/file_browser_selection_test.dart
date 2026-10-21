@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dream_player/l10n/app_localizations.dart';
 import 'package:dream_player/models/video_item.dart';
 import 'package:dream_player/screens/file_browser_screen.dart';
+import 'package:dream_player/services/library_folders.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,9 +31,14 @@ void main() {
   final List<String> deleted = <String>[];
   final List<String> copied = <String>[];
 
+  /// When set, the scan blocks on this listing so a test can observe the
+  /// progress overlay and press Cancel mid-scan.
+  Completer<void>? holdFilmA;
+
   setUp(() {
     deleted.clear();
     copied.clear();
+    holdFilmA = null;
     SharedPreferences.setMockInitialValues({});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -43,6 +50,12 @@ void main() {
             {
               'name': 'Internal storage',
               'path': '/storage/emulated/0',
+              'isDirectory': true,
+              'size': 0,
+            },
+            {
+              'name': 'USB drive (MyPassport)',
+              'path': '/storage/ABCD-1234',
               'isDirectory': true,
               'size': 0,
             },
@@ -81,6 +94,54 @@ void main() {
               },
             ];
           }
+          if (path == '/storage/ABCD-1234') {
+            return <Map<String, dynamic>>[
+              {
+                'name': 'Films',
+                'path': '/storage/ABCD-1234/Films',
+                'isDirectory': true,
+                'size': 0,
+              },
+            ];
+          }
+          if (path == '/storage/ABCD-1234/Films') {
+            return <Map<String, dynamic>>[
+              {
+                'name': 'Film A',
+                'path': '/storage/ABCD-1234/Films/Film A',
+                'isDirectory': true,
+                'size': 0,
+              },
+              {
+                'name': 'Film B',
+                'path': '/storage/ABCD-1234/Films/Film B',
+                'isDirectory': true,
+                'size': 0,
+              },
+            ];
+          }
+          if (path == '/storage/ABCD-1234/Films/Film A') {
+            final hold = holdFilmA;
+            if (hold != null) await hold.future;
+            return <Map<String, dynamic>>[
+              {
+                'name': 'a.mkv',
+                'path': '/storage/ABCD-1234/Films/Film A/a.mkv',
+                'isDirectory': false,
+                'size': 1234,
+              },
+            ];
+          }
+          if (path == '/storage/ABCD-1234/Films/Film B') {
+            return <Map<String, dynamic>>[
+              {
+                'name': 'b.mkv',
+                'path': '/storage/ABCD-1234/Films/Film B/b.mkv',
+                'isDirectory': false,
+                'size': 2345,
+              },
+            ];
+          }
           return <Map<String, dynamic>>[];
         case 'deleteLocalFile':
           deleted.add((call.arguments as Map)['path'] as String);
@@ -115,6 +176,20 @@ void main() {
     await tester.tap(find.text('Internal storage'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Movies').first);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openUsbFilms(WidgetTester tester) async {
+    await tester.pumpWidget(wrap());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('USB drive (MyPassport)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Films').first);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> addToLibrary(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('addCurrentFolderToLibrary')));
     await tester.pumpAndSettle();
   }
 
@@ -347,6 +422,73 @@ void main() {
   // Delete is Android-only, so the gate itself is asserted against the source:
   // a non-Android host cannot open the menu at all, which would make the three
   // skipped tests above silently cover nothing.
+  // Issue #50 follow-up: bookmarking a USB folder used to ignore Settings ->
+  // "Auto-expand folders" (it always scanned) and the scan itself ran with no
+  // progress or cancel, so a large volume looked like a hang.
+  group('Add this folder to library', () {
+    testWidgets('expands into leaf cards when auto-expand is on',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'dreamplayer.autoExpandFolders': true,
+      });
+      await openUsbFilms(tester);
+      await addToLibrary(tester);
+
+      final folders = await LibraryFoldersStore.load();
+      expect(folders.map((f) => f.name).toSet(), {'Film A', 'Film B'});
+      expect(folders.every((f) => f.parentId != null), isTrue,
+          reason: 'expanded cards are children of the scanned root');
+      final roots = await LibraryFoldersStore.loadScanRoots();
+      expect(roots.length, 1,
+          reason: 'pull-to-refresh needs the seed to rescan the volume');
+      expect(roots.values.single.path, '/storage/ABCD-1234/Films');
+    });
+
+    testWidgets('Cancel aborts the scan and adds nothing', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'dreamplayer.autoExpandFolders': true,
+      });
+      holdFilmA = Completer<void>();
+      await openUsbFilms(tester);
+
+      await tester.tap(find.byKey(const ValueKey('addCurrentFolderToLibrary')));
+      // Not pumpAndSettle: the scan is deliberately blocked, so the overlay
+      // (and its spinner) is expected to stay up.
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Scanning folders…'), findsOneWidget);
+      expect(find.text('2 folders checked'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('cancelLibraryScan')));
+      await tester.pump();
+      holdFilmA!.complete();
+      holdFilmA = null;
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scanning folders…'), findsNothing,
+          reason: 'the overlay must come down even on the abort path');
+      expect(await LibraryFoldersStore.load(), isEmpty,
+          reason: 'a cancelled scan must not half-populate the library');
+    });
+
+    testWidgets('adds one card and records no scan root when off',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'dreamplayer.autoExpandFolders': false,
+      });
+      await openUsbFilms(tester);
+      await addToLibrary(tester);
+
+      final folders = await LibraryFoldersStore.load();
+      expect(folders.length, 1);
+      expect(folders.single.name, 'Films');
+      expect(folders.single.parentId, isNull);
+      // A scan root here would let LocalLibraryRescan fan the folder back out
+      // into cards on the next pull-to-refresh, silently undoing the setting.
+      expect(await LibraryFoldersStore.loadScanRoots(), isEmpty);
+    });
+  });
+
   test('the Delete menu item is gated to Android', () {
     final source =
         File('lib/screens/file_browser_screen.dart').readAsStringSync();
