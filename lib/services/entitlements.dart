@@ -695,6 +695,13 @@ class Entitlements extends ChangeNotifier {
     }
     _restorePending = true;
     _expectedProductId = null;
+    // Ask the App Store first. The plugin's StoreKit 2 restore only enumerates
+    // the local cache, which can be empty after a reinstall even though the
+    // account owns the product; AppStore.sync() is what re-fetches it (and
+    // prompts for the owning Apple ID if the device is signed in with a
+    // different one).
+    final synced = await TrialStore.instance.syncPurchasesWithAppStore();
+    IapLog.instance.log('RESTORE', 'AppStore.sync() -> $synced');
     IapLog.instance.log('RESTORE', 'calling InAppPurchase.instance.restorePurchases()');
     try {
       await InAppPurchase.instance.restorePurchases();

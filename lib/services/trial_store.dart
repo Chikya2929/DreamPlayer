@@ -80,4 +80,25 @@ class TrialStore {
       // rather than losing the trial entirely.
     }
   }
+
+  /// Asks StoreKit to sync with the App Store (`AppStore.sync()`).
+  ///
+  /// This is the missing half of Restore Purchases: the StoreKit 2
+  /// implementation in `in_app_purchase_storekit` only enumerates the local
+  /// transaction cache and never calls `AppStore.sync()`. After a reinstall —
+  /// or after the cache was cleared — that cache can be empty even though the
+  /// account owns the product, and only `sync()` goes to the App Store (and
+  /// prompts for the owning Apple ID when the device is signed in with a
+  /// different one).
+  ///
+  /// Returns false on Android (the channel is iOS-only) and when the sync
+  /// fails, so callers continue with the normal restore path either way.
+  Future<bool> syncPurchasesWithAppStore() async {
+    if (!await _available) return false;
+    try {
+      return await _channel.invokeMethod<bool>('syncPurchases') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import Flutter
 import Security
+import StoreKit
 
 /// Persists the trial start time in the iOS Keychain so it survives
 /// restart, app deletion AND reinstall (anti free-trial-abuse).
@@ -26,6 +27,29 @@ class TrialStore {
         let ms = call.arguments as? Int64
         write(ms)
         result(nil)
+      case "syncPurchases":
+        // Restore Purchases has to ask the App Store. The in_app_purchase
+        // StoreKit 2 path only enumerates the local transaction cache and
+        // never calls AppStore.sync(), so after a reinstall (or any cache
+        // reset) that cache can be empty while the account still owns the
+        // product. sync() is also what prompts for the owning Apple ID when
+        // the device is signed in with a different one.
+        //
+        // Lives on this channel because TrialStore already owns it — a second
+        // Swift channel for one method would need another registration.
+        Task {
+          do {
+            try await AppStore.sync()
+            await MainActor.run { result(true) }
+          } catch {
+            await MainActor.run {
+              result(FlutterError(
+                code: "storekit_sync_failed",
+                message: error.localizedDescription,
+                details: nil))
+            }
+          }
+        }
       default:
         result(FlutterMethodNotImplemented)
       }
