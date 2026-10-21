@@ -230,10 +230,11 @@ class Entitlements extends ChangeNotifier {
 
   /// Re-derive entitlement from the customer's existing StoreKit purchases.
   ///
-  /// Called at app start. Without this, a customer who already paid is locked
-  /// out after an app update: the app boots with `_advanced == false` because
-  /// nothing ever asks StoreKit what the user already owns, and the only way
-  /// back in is tapping Restore Purchases by hand. That is the bug this fixes.
+  /// Called at app start, and again after an explicit Restore Purchases.
+  /// Without this, a customer who already paid is locked out after an app
+  /// update: the app boots with `_advanced == false` because nothing ever asks
+  /// StoreKit what the user already owns, and the only way back in is tapping
+  /// Restore Purchases by hand. That is the bug this fixes.
   ///
   /// Reads `Transaction.all` (a plain query that creates no transactions and
   /// does not touch the payment queue) and keeps any of our products that is
@@ -241,17 +242,29 @@ class Entitlements extends ChangeNotifier {
   /// `InAppPurchase.restorePurchases()` here: that emits through the purchase
   /// stream, where the orphaned-transaction guards in [_onPurchaseUpdate]
   /// correctly reject anything the user did not just buy.
-  Future<void> refreshEntitlements() async {
+  ///
+  /// [force] re-reads even when this session is already entitled, so a restore
+  /// can confirm the purchase instead of trusting a stream event.
+  Future<void> refreshEntitlements({bool force = false}) async {
     if (defaultTargetPlatform == TargetPlatform.android) return;
     if (!paywallEnabled && !_debugFreeUser) return;
-    if (_advanced) return; // already entitled this session
+    if (_advanced && !force) return; // already entitled this session
     try {
       final all = await SK2Transaction.transactions();
       String? entitledProduct;
+      // `environment` is "Sandbox" for TestFlight/development and "Production"
+      // for the App Store. The two have separate transaction histories, which
+      // is why a purchase made in the App Store is invisible in a TestFlight
+      // build (and vice-versa). Log it on every transaction so a "no previous
+      // purchase found" report can be answered from the log instead of guessed
+      // at: zero transactions and a Sandbox entry mean an environment mismatch,
+      // not a broken restore.
+      final seen = <String>[];
       for (final t in all) {
         var productId = t.productId;
         int? expirationMs = _parseEpochMs(t.expirationDate);
         int? revocationMs;
+        var environment = 'unknown';
 
         // jsonRepresentation is the canonical StoreKit 2 payload and carries
         // revocationDate / productID; the wrapper omits revocation entirely.
@@ -265,12 +278,19 @@ class Entitlements extends ChangeNotifier {
               expirationMs = _parseEpochMs(json['expirationDate']) ??
                   expirationMs;
               revocationMs = _parseEpochMs(json['revocationDate']);
+              environment = (json['environment'] ?? 'unknown').toString();
             }
           } catch (_) {
             // Keep the wrapper-derived values; expiry/revocation fall back to
             // the conservative reading below.
           }
         }
+        seen.add('$productId/$environment');
+        IapLog.instance.log(
+          'ENTITLE',
+          'tx product=$productId env=$environment '
+          'expiration=$expirationMs revocation=$revocationMs',
+        );
 
         if (isEntitledTransaction(
           productId: productId,
@@ -283,7 +303,8 @@ class Entitlements extends ChangeNotifier {
       if (entitledProduct == null) {
         IapLog.instance.log(
           'ENTITLE',
-          'no active purchase found in ${all.length} transaction(s)',
+          'no active purchase found in ${all.length} transaction(s) '
+          '(store ${seen.isEmpty ? 'empty' : seen.join(', ')})',
         );
         return;
       }
@@ -678,6 +699,18 @@ class Entitlements extends ChangeNotifier {
     try {
       await InAppPurchase.instance.restorePurchases();
       IapLog.instance.log('RESTORE', 'restorePurchases() completed');
+      // The plugin's StoreKit 2 restore enumerates `currentEntitlements` and
+      // delivers them through the purchase stream; it never calls
+      // `AppStore.sync()`. Re-derive from `Transaction.all` as well so a
+      // restore does not depend on a stream event landing inside the paywall's
+      // three-second window. This is a read-only query — it cannot grant an
+      // entitlement that StoreKit does not already report.
+      await refreshEntitlements(force: true);
+      IapLog.instance.log(
+        'RESTORE',
+        'post-restore refresh: isAdvanced=$_advanced '
+        'active=${_activeProductId ?? 'none'}',
+      );
     } catch (e) {
       IapLog.instance.log('RESTORE', 'restorePurchases() ERROR: $e');
       _restorePending = false;
