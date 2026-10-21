@@ -836,6 +836,57 @@ def check_objc_no_reimplementation():
             seen[name] = n
 
 
+# --------------------------------------------------------------------------
+# 15. iOS 27 readiness.
+# --------------------------------------------------------------------------
+def check_ios27_readiness():
+    """Xcode 27 has two hard requirements this project can trip on.
+
+    * Its supported deployment-target range is 15.0 to 27.x; a lower floor is
+      a build error, not a warning.
+    * An app built with the iOS 27 SDK **must** use the UIScene lifecycle or
+      it fails to launch. DreamPlayer has a customised AppDelegate (platform
+      view + channels), so Flutter's automatic migration cannot be assumed —
+      the manifest and SceneDelegate are checked explicitly.
+
+    Both were manual edits in this tree and both fail only on a Mac, so they
+    belong in the Linux-side gate.
+    """
+    if os.path.exists(PBXPROJ):
+        pbx = open(PBXPROJ, encoding="utf-8").read()
+        targets = sorted(set(re.findall(
+            r"IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*;",
+            pbx)))
+        if not targets:
+            fail("project.pbxproj: no IPHONEOS_DEPLOYMENT_TARGET — Xcode 27 "
+                 "requires an explicit floor of at least 15.0")
+        for target in targets:
+            if float(target) < 15.0:
+                fail(f"project.pbxproj: IPHONEOS_DEPLOYMENT_TARGET = {target} "
+                     f"is outside the range Xcode 27 accepts (15.0 to 27.x)")
+
+    plist = os.path.join(RUNNER, "Info.plist")
+    if not os.path.exists(plist):
+        fail("ios/Runner/Info.plist not found")
+    else:
+        info = open(plist, encoding="utf-8").read()
+        if "<key>UIApplicationSceneManifest</key>" not in info:
+            fail("Info.plist: UIApplicationSceneManifest is missing — an app "
+                 "built with the iOS 27 SDK without the UIScene lifecycle "
+                 "fails to launch at startup")
+        elif "UISceneDelegateClassName" not in info or \
+                "SceneDelegate" not in info:
+            fail("Info.plist: UIApplicationSceneManifest does not point at "
+                 "SceneDelegate — the UIScene lifecycle would not be wired")
+
+    scene = os.path.join(RUNNER, "SceneDelegate.swift")
+    if not os.path.exists(scene):
+        fail("ios/Runner/SceneDelegate.swift is missing — the UIScene "
+             "lifecycle is required when building with the iOS 27 SDK")
+    elif "FlutterSceneDelegate" not in open(scene, encoding="utf-8").read():
+        fail("SceneDelegate.swift does not subclass FlutterSceneDelegate")
+
+
 def main():
     if not os.path.isdir(RUNNER):
         print(f"FAIL  {RUNNER} not found")
@@ -855,6 +906,7 @@ def main():
     check_objc_method_inside_implementation()
     check_objc_no_reimplementation()
     check_no_control_characters()
+    check_ios27_readiness()
 
     if problems:
         for p in problems:

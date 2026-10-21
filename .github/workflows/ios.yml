@@ -22,7 +22,11 @@ on:
 jobs:
   build-ios:
     name: Build iOS app
-    runs-on: macos-latest
+    # The `xcode-27` image is the only GitHub-hosted runner that ships the
+    # iOS 27 SDK (GA 2026-10-15). `macos-latest` still defaults to Xcode 26,
+    # and an app must be built with the iOS 27 SDK or later for App Store
+    # uploads from April 2027. It is arm64-only, which Flutter supports.
+    runs-on: xcode-27
     timeout-minutes: 60
 
     steps:
@@ -36,6 +40,25 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+
+      - name: Verify iOS 27 SDK
+        # Fail early and explain, instead of silently shipping an Xcode 26
+        # build if the runner label ever falls back. Also prints the exact
+        # Xcode/SDK so a support report can be answered from the log.
+        run: |
+          xcodebuild -version
+          SDK_VERSION="$(xcodebuild -showsdks \
+            | sed -n 's/.*iphoneos\([0-9][0-9.]*\).*/\1/p' \
+            | sort -V | tail -1)"
+          echo "iPhoneOS SDK: ${SDK_VERSION:-<none>}"
+          if [ -z "$SDK_VERSION" ]; then
+            echo "::error::No iPhoneOS SDK found in this Xcode installation."
+            exit 1
+          fi
+          if [ "${SDK_VERSION%%.*}" -lt 27 ]; then
+            echo "::error::Building with the iOS $SDK_VERSION SDK. DreamPlayer requires the iOS 27 SDK (runs-on: xcode-27)."
+            exit 1
+          fi
 
       - name: Fetch dependencies
         run: |
