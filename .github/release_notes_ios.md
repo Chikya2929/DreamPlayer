@@ -23,8 +23,8 @@ platform and carried engine/implementation detail.
 ## Which build each section describes
 
 A section must only claim what is **actually in that build**, not what is on
-`main`. TestFlight 43 was commit `9d75ae3`; the shipped 0.5.2 is build 48
-(commit `f0f007e`). Anything committed after the section's build belongs in
+`main`. TestFlight 43 was commit `9d75ae3`; the shipped 0.5.2 is build 49
+(commit `a550985`). Anything committed after the section's build belongs in
 the *next* section.
 
 An earlier draft of this file advertised chapter markers in 0.5.1, which was
