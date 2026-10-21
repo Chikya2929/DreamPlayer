@@ -86,8 +86,6 @@ class _SmbScreenState extends State<SmbScreen> {
   bool _loadingSeriesMeta = false;
   final Set<int> _expandedSeasons = {};
 
-  bool get _atBrowseRoot => _browsing == null || (_share.isEmpty && _path.isEmpty);
-
   @override
   void initState() {
     super.initState();
@@ -400,9 +398,36 @@ class _SmbScreenState extends State<SmbScreen> {
 
   Future<void> _onRefresh() async {
     final server = _browsing;
-    if (server == null) return;
+    if (server == null) {
+      await _loadServers();
+      return;
+    }
     await _smb.invalidateListingCache(serverId: server.id);
+    if (_share.isEmpty) {
+      // At the shares level there is no SMB tree to open: `listDirectory`
+      // with an empty share asks libsmb2 to read the server root, which
+      // always fails ("Could not read that folder"). Refresh the share list
+      // instead — the pull gesture is on `_flatFileList`, which doubles as
+      // the shares view.
+      await _openServer(server);
+      return;
+    }
     await _loadDirectory(_path);
+  }
+
+  /// Re-runs whatever the current level is: server list, shares, or folder.
+  /// The error state used to call `_loadServers` at the browse root, which
+  /// left `_browsing` set and refreshed the wrong list, so Retry never
+  /// recovered from a failed share listing.
+  Future<void> _retry() async {
+    final server = _browsing;
+    if (server == null) {
+      await _loadServers();
+    } else if (_share.isEmpty) {
+      await _openServer(server);
+    } else {
+      await _loadDirectory(_path);
+    }
   }
 
   /// Background-fetch file sizes for non-directory entries. listDirectory
@@ -982,7 +1007,7 @@ class _SmbScreenState extends State<SmbScreen> {
                   style: TextStyle(color: Theme.of(context).colorScheme.error)),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: _atBrowseRoot ? _loadServers : _goUp,
+                onPressed: _retry,
                 child: const Text('Retry'),
               ),
             ],
