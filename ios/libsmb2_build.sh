@@ -8,15 +8,11 @@
 # `xcrun clang` is already on the runner because the Xcode build needs it.
 #
 # The flag set below was derived from the upstream CMakeLists and then verified
-# by compiling all 61 translation units on a Linux host before it was first run
+# by compiling every translation unit on a Linux host before it was first run
 # on a Mac. The non-obvious parts, in the order they bite:
 #
 #   -DHAVE_CONFIG_H          include/config.h (upstream's include/apple/config.h)
 #                            carries the HAVE_* answers for Darwin.
-#   -DHAVE_DCERPC_FULL=1     libdcerpc/CMakeLists.txt sets this unconditionally;
-#                            without it smb2-share-enum.c calls
-#                            dcerpc_pdu_yaml_key() which dcerpc.c then compiles
-#                            out, so the link fails on an undefined symbol.
 #   -D_U_=                   aes128ccm.c marks intentionally-unused variables
 #                            with OpenSSL's _U_. We do not link OpenSSL — SMB3
 #                            encryption is optional and aes_apple.c uses Apple's
@@ -58,9 +54,14 @@ mkdir -p "$OBJ_DIR"
 
 DEFINES=(
   -DHAVE_CONFIG_H
-  -DHAVE_DCERPC_FULL=1
   -D_U_=
 )
+
+# NOT -DHAVE_DCERPC_FULL. That flag enables the YAML/JSON DCE/RPC encodings and
+# the extra LSA/WKSSVC/WinReg service modules, none of which this app uses; the
+# share enumeration path is plain NDR. Leaving it off also keeps dcerpc.c from
+# pulling in the MS-DTYP/ACL coders, which is what the prefix header documents
+# as the minimal configuration.
 
 INCLUDES=(
   -I "$SRC/include"
@@ -81,22 +82,62 @@ FLAGS=(
 )
 
 count=0
-for unit in "$SRC"/lib/*.c "$SRC"/libdcerpc/*.c "$SRC"/shim/*.c; do
-  [ -e "$unit" ] || continue
+compile() {
+  unit="$1"
+  shift
+  [ -e "$unit" ] || return 0
   obj="$OBJ_DIR/$(echo "${unit#$SRC/}" | tr '/' '_' | sed 's/\.c$/.o/')"
-  "$CC" -c "$unit" -o "$obj" "${FLAGS[@]}" "${DEFINES[@]}" "${INCLUDES[@]}"
+  "$CC" -c "$unit" -o "$obj" "${FLAGS[@]}" "${DEFINES[@]}" "${INCLUDES[@]}" "$@"
   count=$((count + 1))
+}
+
+for unit in "$SRC"/lib/*.c "$SRC"/shim/*.c; do
+  compile "$unit"
+done
+
+# libsmb2's DCE/RPC internals are renamed with a libsmb2_ prefix so they cannot
+# clash with another libdcerpc in the link. smb2-share-enum.c includes that
+# header itself; the units that DEFINE the functions must be compiled with it
+# too, or the archive exports dcerpc_create_context while the share-enum object
+# asks for libsmb2_dcerpc_create_context and the app fails to link with
+# `Undefined symbol: _libsmb2_dcerpc_create_context` (build 46, 2026-10-21).
+# Only these two units are needed without HAVE_DCERPC_FULL; the other
+# libdcerpc modules belong to services this app never calls.
+DCERPC_PREFIX_HEADER="$SRC/lib/libsmb2-dcerpc-prefix.h"
+for unit in "$SRC/libdcerpc/dcerpc.c" "$SRC/libdcerpc/dcerpc-srvsvc.c"; do
+  compile "$unit" -include "$DCERPC_PREFIX_HEADER"
 done
 
 echo "libsmb2: compiled $count translation units"
 
-if [ "$count" -lt 60 ]; then
-  echo "libsmb2: expected >=60 units, got $count — vendored sources look truncated" >&2
+if [ "$count" -lt 55 ]; then
+  echo "libsmb2: expected >=55 units, got $count — vendored sources look truncated" >&2
   exit 1
 fi
 
 rm -f "$OUT_DIR/libsmb2.a"
 ar rcs "$OUT_DIR/libsmb2.a" "$OBJ_DIR"/*.o
+
+# The NetrShareEnum path is the only user of DCE/RPC, and build 46 failed at the
+# very end of a six-minute Xcode archive because those definitions were missing.
+# Check them here instead: this step is seconds, the archive is local, and a
+# missing symbol is the same finding either way. `nm -gU` on macOS lists only
+# defined external symbols (note: -U means the opposite of GNU nm).
+for sym in \
+  libsmb2_dcerpc_call_async \
+  libsmb2_dcerpc_connect_context_async \
+  libsmb2_dcerpc_create_context \
+  libsmb2_dcerpc_destroy_context \
+  libsmb2_dcerpc_get_smb2_context \
+  libsmb2_srvsvc_interface \
+  libsmb2_srvsvc_NetrShareEnum_req_coder \
+  libsmb2_srvsvc_NetrShareEnum_rep_coder
+do
+  if ! nm -gU "$OUT_DIR/libsmb2.a" 2>/dev/null | grep -qE " [A-Z] _${sym}$"; then
+    echo "libsmb2: archive is missing $sym — the share enumeration path will fail to link" >&2
+    exit 1
+  fi
+done
 
 # The real link happens in Xcode, which reports anything genuinely missing far
 # more clearly than a symbol scan here. Just assert the archive is non-trivial
