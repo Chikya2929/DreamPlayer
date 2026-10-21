@@ -16,12 +16,12 @@ that copying a block for App Store Connect can never pick up a stray note:
 
 | Version | Build | Characters (limit 4000) |
 |---|---|---|
-| 0.5.2 | 45 | 1094 |
+| 0.5.2 | 46 | 1193 |
 | 0.5.1 | 36 | 3833 |
 
 ---
 
-## 0.5.2 (build 45)
+## 0.5.2 (build 46)
 
 Choose your app icon. Settings → Appearance → App icon now offers five launcher
 icons on iPhone and iPad: the original logo and wordmark, the logo on its own,
@@ -43,6 +43,8 @@ Fixed:
   had no effect.
 • Pulling down to refresh the list of shared folders no longer reports that the
   folder could not be read.
+• Every shared folder on the server now appears in the list, not just folders
+  with common names.
 
 ---
 

@@ -6,6 +6,8 @@
 #import <fcntl.h>
 #import <smb2/smb2.h>
 #import <smb2/libsmb2.h>
+#import <smb2/libsmb2-raw.h>
+#import <smb2/libsmb2-share-enum.h>
 
 /// LibSMB2File's initialiser is private, but LibSMB2Session.openFile calls it
 /// from above, and Objective-C needs a visible declaration before a use.
@@ -484,7 +486,8 @@ static NSString *LibSMB2NativePath(NSString *path) {
 #pragma mark - Browsing
 
 + (NSArray<NSString *> *)commonShareNames {
-  // SMB2 has no share-enumeration request, so the list is a probe. Mirrors
+  // SMB2 has no share-enumeration command of its own, so when the SRVSVC RPC
+  // below is unavailable the list falls back to a probe. Mirrors
   // COMMON_SHARES in SMBClient.kt so both platforms behave the same.
   static NSArray<NSString *> *names;
   static dispatch_once_t once;
@@ -499,6 +502,85 @@ static NSString *LibSMB2NativePath(NSString *path) {
   return names;
 }
 
+/// Enumerates the server's shares over the SRVSVC RPC on IPC$.
+///
+/// This is the SMB2 way to list shares (the protocol itself has no enumerate
+/// command, but Windows/Samba both implement NetrShareEnum on the IPC$ tree) and
+/// it is what jcifs-ng does on Android. Without it, shares whose names are not
+/// in [commonShareNames] — e.g. a Samba share called "Linux Downloads" — were
+/// invisible on iOS while Android showed them.
+///
+/// Returns an empty array when enumeration is unavailable (IPC$ denied, RPC
+/// disabled, guest-only server, or a timeout), so the caller can fall back to
+/// probing common names. Hidden (`$`) shares and non-disk (IPC$/print) trees are
+/// omitted; a hand-added hidden share is probed by the caller instead.
++ (NSArray<NSString *> *)enumerateSharesForHost:(NSString *)host
+                                           port:(uint16_t)port
+                                           user:(nullable NSString *)user
+                                       password:(nullable NSString *)password
+                                         domain:(nullable NSString *)domain
+                                        timeout:(int)timeoutSeconds {
+  NSString *server = port == 445
+      ? host
+      : [NSString stringWithFormat:@"%@:%hu", host, port];
+
+  NSMutableArray<NSString *> *names = [NSMutableArray array];
+  NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+  struct smb2_context *ctx = smb2_init_context();
+  if (ctx == NULL) {
+    return names;
+  }
+  smb2_set_timeout(ctx, timeoutSeconds);
+  smb2_set_version(ctx, SMB2_VERSION_ANY);
+  smb2_set_seal(ctx, 0);
+  smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED);
+  BOOL wantsGuest = (user.length == 0);
+  smb2_set_user(ctx, wantsGuest ? "guest" : user.UTF8String);
+  smb2_set_password(ctx, wantsGuest ? "" : (password.length ? password.UTF8String : ""));
+  if (domain.length) {
+    smb2_set_domain(ctx, domain.UTF8String);
+  }
+  smb2_set_workstation(ctx, "DreamPlayer");
+
+  if (smb2_connect_share(ctx, server.UTF8String, "IPC$",
+                         wantsGuest ? NULL : user.UTF8String) == 0) {
+    struct srvsvc_NetrShareEnum_rep *rep =
+        smb2_share_enum_sync(ctx, SHARE_INFO_1);
+    if (rep != NULL) {
+      if (rep->status == 0 && rep->ses.Level == SHARE_INFO_1) {
+        const struct srvsvc_SHARE_INFO_1_CONTAINER *list =
+            &rep->ses.ShareEnum.Level1;
+        for (uint32_t i = 0; i < list->EntriesRead; i++) {
+          const struct srvsvc_SHARE_INFO_1 *info = &list->share_info_1[i];
+          // Low two bits are STYPE_*: 0 disk, 1 print, 2 device, 3 IPC.
+          if ((info->type & 0x00000003) != SRVSVC_SHARE_TYPE_DISKTREE) {
+            continue;
+          }
+          if ((info->type & SRVSVC_SHARE_TYPE_HIDDEN) != 0 ||
+              info->netname == NULL) {
+            continue;
+          }
+          NSString *name = [NSString stringWithUTF8String:info->netname];
+          if (name.length == 0 || [name hasSuffix:@"$"]) {
+            continue;
+          }
+          NSString *key = name.lowercaseString;
+          if ([seen containsObject:key]) {
+            continue;
+          }
+          [seen addObject:key];
+          [names addObject:name];
+        }
+      }
+      // Everything the RPC allocated lives under this one pointer.
+      smb2_free_data(ctx, rep);
+    }
+  }
+  smb2_destroy_context(ctx);
+  return names;
+}
+
 + (nullable NSArray<NSString *> *)listSharesForHost:(NSString *)host
                                                port:(uint16_t)port
                                                user:(nullable NSString *)user
@@ -507,10 +589,20 @@ static NSString *LibSMB2NativePath(NSString *path) {
                                     extraShareNames:(nullable NSArray<NSString *> *)extraShareNames
                                             timeout:(int)timeoutSeconds
                                               error:(NSError *_Nullable *_Nullable)error {
-  NSMutableArray<NSString *> *found = [NSMutableArray array];
+  NSMutableArray<NSString *> *found = [[self enumerateSharesForHost:host
+                                                                port:port
+                                                                user:user
+                                                            password:password
+                                                              domain:domain
+                                                             timeout:timeoutSeconds] mutableCopy];
   NSMutableArray<NSString *> *candidates = [NSMutableArray array];
-  [candidates addObjectsFromArray:[self commonShareNames]];
+  if (found.count == 0) {
+    // Enumeration failed: probe the usual names instead of showing nothing.
+    [candidates addObjectsFromArray:[self commonShareNames]];
+  }
   if (extraShareNames.count > 0) {
+    // Always probe these: a hidden share (`$`) is omitted by enumeration, and a
+    // stale hand-added name must not be displayed without connecting.
     [candidates addObjectsFromArray:extraShareNames];
   }
 
@@ -519,6 +611,15 @@ static NSString *LibSMB2NativePath(NSString *path) {
       : [NSString stringWithFormat:@"%@:%hu", host, port];
 
   for (NSString *share in candidates) {
+    if (share.length == 0) {
+      continue;
+    }
+    BOOL alreadyFound = [found indexOfObjectPassingTest:^BOOL(NSString *name, NSUInteger idx, BOOL *stop) {
+      return [name caseInsensitiveCompare:share] == NSOrderedSame;
+    }] != NSNotFound;
+    if (alreadyFound) {
+      continue;
+    }
     // One context per probe: a share that fails to tree-connect must not poison
     // the socket for the next candidate.
     struct smb2_context *ctx = smb2_init_context();

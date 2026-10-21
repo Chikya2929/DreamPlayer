@@ -13,8 +13,9 @@ import Security
 /// was the reason browsing and playback behaved differently, and it is why the
 /// old transport needed an async-to-sync reader adaptation that deadlocked.
 ///
-/// SMB2 has no share-enumeration request, so `listShares` probes a list of
-/// common share names plus any the user added by hand, exactly as Android does.
+/// `listShares` enumerates the server's shares over the SRVSVC RPC on IPC$
+/// (the same mechanism jcifs-ng uses on Android) and probes common share names
+/// plus any the user added by hand only when enumeration is unavailable.
 ///
 /// Credentials never cross to Dart: passwords live in the Keychain and Dart
 /// only ever sees a `hasPassword` boolean, mirroring `WebDAVClient`.
@@ -36,10 +37,11 @@ final class SMBBridge: NSObject {
         var username: String
         var domain: String
         var anonymous: Bool
-        /// Share names the user added by hand. SMB2 cannot enumerate shares, so
-        /// these are merged into the probe list in `listShares`. Optional so
-        /// servers saved before this field existed still decode — a synthesized
-        /// `Codable` ignores a declared default for a missing key.
+        /// Share names the user added by hand. Enumeration omits hidden (`$`)
+        /// shares, so `listShares` always probes these and merges the ones that
+        /// connect. Optional so servers saved before this field existed still
+        /// decode — a synthesized `Codable` ignores a declared default for a
+        /// missing key.
         var addedShares: [String]?
     }
 
@@ -911,10 +913,9 @@ final class SMBBridge: NSObject {
     ) {
         Task.detached(priority: .userInitiated) {
             do {
-                // SMB2 has no share-enumeration request, so this probes the
-                // common names plus anything the user added by hand. The
-                // `print$`/IPC$ filter is no longer needed: hidden shares are
-                // filtered by the trailing `$` when the names are built.
+                // Enumerates over SRVSVC/IPC$, falling back to probing common
+                // names plus anything the user added by hand. The native side
+                // filters non-disk trees and hidden (`$`) shares.
                 let shares = try LibSMB2.listShares(
                     forHost: server.host,
                     port: UInt16(truncatingIfNeeded: server.port),
