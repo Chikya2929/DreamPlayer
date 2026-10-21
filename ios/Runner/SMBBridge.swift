@@ -1048,13 +1048,26 @@ final class SMBBridge: NSObject {
         let subtitles = files.filter { Self.isSubtitle($0.name) }
         let subtitleBases = subtitles.map { Self.baseName($0.name) }
 
-        return files
+        let visible = files
             .filter { !$0.name.isEmpty }
             // `.` and `..` come back as directories, and the next line exempts
             // directories from the junk filter, so the dot-prefix rule never
             // reached them. Drop them by name first, before that exemption.
             .filter { Self.isDotEntry($0.name) == false }
             .filter { $0.isDirectory || !Self.isJunk($0.name) }
+
+        // Folders before files, each group alphabetical — the same order
+        // Android's SMBClient produces (sorted dirs + sorted files), so a
+        // folder lists identically on both platforms. libsmb2 hands the
+        // entries back in server order, which mixes the two.
+        let directories = visible
+            .filter { $0.isDirectory }
+            .sorted { Self.nameAscending($0, $1) }
+        let videos = visible
+            .filter { !$0.isDirectory }
+            .sorted { Self.nameAscending($0, $1) }
+
+        return (directories + videos)
             .map { file -> [String: Any] in
                 var entry: [String: Any] = [
                     "name": file.name,
@@ -1089,6 +1102,19 @@ final class SMBBridge: NSObject {
     private static func join(_ path: String, _ name: String) -> String {
         let base = normalized(path)
         return base.isEmpty ? name : base + "/" + name
+    }
+
+    /// Case-insensitive name order. Swift's `lowercased()` is locale
+    /// independent (unlike `lowercased(with:)`), so this matches Android's
+    /// `Locale.ROOT` sort rather than picking up the user's locale — a Turkish
+    /// locale would otherwise order `i` after `h`. The raw comparison is the
+    /// tie-break because Swift's sort is not stable, so two names that differ
+    /// only by case would otherwise come back in an arbitrary order.
+    private static func nameAscending(_ a: LibSMB2Entry, _ b: LibSMB2Entry) -> Bool {
+        let left = a.name.lowercased()
+        let right = b.name.lowercased()
+        if left != right { return left < right }
+        return a.name < b.name
     }
 
     private static func baseName(_ name: String) -> String {

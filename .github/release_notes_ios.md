@@ -64,6 +64,9 @@ true of the intended build but not of the one that was reviewed. Verify with
 • Restoring a purchase now asks the App Store directly and re-reads what your
   account owns, instead of relying on a delayed notification.
 
+• Folders now come before files when you browse a shared folder, each in
+  alphabetical order.
+
 ---
 
 ## 0.5.1

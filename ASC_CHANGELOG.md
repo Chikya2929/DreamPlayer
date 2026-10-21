@@ -16,12 +16,12 @@ that copying a block for App Store Connect can never pick up a stray note:
 
 | Version | Build | Characters (limit 4000) |
 |---|---|---|
-| 0.5.2 | 48 | 1333 |
+| 0.5.2 | 49 | 1429 |
 | 0.5.1 | 36 | 3833 |
 
 ---
 
-## 0.5.2 (build 48)
+## 0.5.2 (build 49)
 
 Choose your app icon. Settings → Appearance → App icon now offers five launcher
 icons on iPhone and iPad: the original logo and wordmark, the logo on its own,
@@ -47,6 +47,9 @@ Fixed:
   with common names.
 • Restoring a purchase now asks the App Store directly and re-reads what your
   account owns, instead of relying on a delayed notification.
+
+• Folders now come before files when you browse a shared folder, each in
+  alphabetical order.
 
 ---
 
