@@ -16,7 +16,31 @@ that copying a block for App Store Connect can never pick up a stray note:
 
 | Version | Build | Characters (limit 4000) |
 |---|---|---|
-| 0.5.1 | 36 | 3848 |
+| 0.5.2 | 44 | 986 |
+| 0.5.1 | 36 | 3833 |
+
+---
+
+## 0.5.2 (build 44)
+
+Choose your app icon. Settings → Appearance → App icon now offers five launcher
+icons on iPhone and iPad: the original logo and wordmark, the logo on its own,
+and the logo in red, green or cyan. Pick one and it applies straight away — no
+reinstall. The wordmark-free logo is handy when your device already prints the
+app name underneath the icon.
+
+An extra metadata source, for titles the main catalogue does not carry.
+Settings → Metadata now offers a second, optional catalogue. It needs no
+account, key or sign-in, and it matches films by name, release code or numeric
+ID, with poster art and details like any other match. It is off until you
+switch it on, and you can switch it off again at any time; titles that already
+match are not affected. It covers films only, so television folders keep using
+the main catalogue.
+
+Fixed:
+• The icon picker could fail to open on smaller screens.
+• The file browser no longer offers a Delete option on iPhone and iPad, where it
+  had no effect.
 
 ---
 
@@ -59,7 +83,7 @@ Also new:
 • Cleaner folder listings — Samba's "print$" printer share and the "." and ".."
   parent-directory entries no longer clutter the file list.
 • Server named for you — add a server without typing a name and it is listed as
-  its IP address, as on Android.
+  its IP address.
 
 Artwork, everywhere:
 • One poster per film — change a poster or backdrop once and it now shows
