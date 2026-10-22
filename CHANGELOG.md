@@ -7,15 +7,13 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
-- **File-identity chip on the player.** Settings → Player → On-screen badges
-  has a new **File / episode** option (off by default). With it on, the player
-  shows `S01E05 · Tarnished Cities` on its own row under the format chips, so
-  the episode being played is readable even though the title line carries the
-  show name. The name comes from metadata that is already cached — no extra
-  request — with the bare code as the fallback when the episode has no cached
-  name, and nothing at all for movies. It never guesses a season: an
-  episode-only name (`E05`, `[01]`) needs the folder's matched season or a
-  cached season to resolve, so a season-4 file is never labelled `S01E05`.
+- **The episode being played is now named in the player.** The title line
+  carries the show name, so an episode was anonymous once playback started; it
+  now reads `Dark` followed by `S01E01 · Tannhaus` on the same line. The code
+  appears for every episode, and the episode name appears whenever metadata has
+  already resolved — with no extra request, since the details screen has fetched
+  it. Films are unchanged. It never guesses a season, so a file whose name only
+  carries `E05` or `[01]` shows a code only when the folder's season is known.
 
 ### Changed
 

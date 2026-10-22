@@ -307,11 +307,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _badgeServerTranscode = true;
   bool _badgeDecoder = false;
 
-  /// File-identity chip (`S01E05 · Episode name`). Opt-in: a movie has no
-  /// episode code and its title is already the line above, so this stays off
-  /// unless the user asks for it under Settings → Player → On-screen badges.
-  bool _badgeFileEpisode = false;
-
   /// Saved audio track to restore after the next open (index for Media3,
   /// track id string for MPV). Set from [AudioTrackStore] in [_openCurrent]
   /// (Media3) or [_startMpvPrimary]/[_startMpvFallback]/[_reloadMpv] (MPV)
@@ -698,7 +693,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       _badgeSpatialAudio = bf.spatialAudio;
       _badgeServerTranscode = bf.serverTranscode;
       _badgeDecoder = bf.decoder;
-      _badgeFileEpisode = bf.fileEpisode;
     } catch (_) {}
     _markedWatched = false;
     _autoPlayFired = false;
@@ -6786,20 +6780,31 @@ if (mounted) setState(_applySwipeValue);
     return _current.audioCodecLabel;
   }
 
-  /// `S01E05 · Episode name` for the file chip below the format chips, or
-  /// null when it does not apply (a movie, an unparseable name, or no
-  /// metadata yet). Reads the cached episode title only — no network here:
-  /// the details screen and the folder prefetch have already filled it, and
-  /// the chip still works from the code alone when they have not.
-  String? get _fileChipLabel {
-    final meta = _tmdbMeta;
-    return fileEpisodeChipLabel(
+  /// `S01E05` plus the episode name for the title area, or null when this is
+  /// not an episode. The title line carries the SHOW title, so this is what
+  /// identifies the episode being played.
+  ///
+  /// The name is read from cached metadata only — no request here. Seasons are
+  /// cached under the folder/show key the details screen fetched them with
+  /// (see [TmdService.metaWithSeasons]), not under the file's own key, so the
+  /// lookup has to widen past `_tmdbMeta` or every episode would show its bare
+  /// code.
+  ({String code, String? name})? get _episodeLine {
+    final meta = TmdService.instance.metaWithSeasons(_tmdbMeta);
+    final episode = resolvedPlayerEpisode(
       title: _current.title,
       seasonNumber: _current.seasonNumber,
       episodeNumber: _current.episodeNumber,
-      folderSeason: meta?.folderSeason,
+      folderSeason: _tmdbMeta?.folderSeason ?? meta?.folderSeason,
       firstAvailableSeason: _firstCachedSeason(meta),
-      nameOf: (season, episode) => meta?.seasons[season]?.episode(episode)?.name,
+    );
+    if (episode == null) return null;
+    final name =
+        meta?.seasons[episode.season]?.episode(episode.episode)?.name.trim() ??
+            '';
+    return (
+      code: episodeCode(episode.season, episode.episode),
+      name: name.isEmpty ? null : name,
     );
   }
 
@@ -6929,12 +6934,7 @@ if (mounted) setState(_applySwipeValue);
       }
     }
 
-    // File identity gets its own row under the format chips: an episode name
-    // can be long, and wrapping it into the same `Wrap` would push the format
-    // chips around as the name changes length. Gated by the master toggle too,
-    // so "badges off" still means no chips at all.
-    final fileChipLabel =
-        _badgeEnabled && _badgeFileEpisode ? _fileChipLabel : null;
+    final episodeLine = _episodeLine;
 
     // IMPORTANT: keep the widget-tree shape stable across casting state.
     // The platform view must ALWAYS be mounted at the same slot — swapping
@@ -7505,18 +7505,60 @@ if (mounted) setState(_applySwipeValue);
                               onFocusChange: (_) => _showControls(),
                             ),
                             SizedBox(width: 4),
-                             Expanded(
-                               child: Text(
-                                 _displayTitle,
-                                 maxLines: 1,
-                                 overflow: TextOverflow.ellipsis,
-                                 style: const TextStyle(
-                                   color: Colors.white,
-                                   fontSize: 16,
-                                   fontWeight: FontWeight.w600,
-                                 ),
-                               ),
-                             ),
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    flex: 3,
+                                    child: Text(
+                                      _displayTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  // The episode, beside the show title: the
+                                  // code is the identity, the name is a bonus
+                                  // that many shows simply do not have.
+                                  if (episodeLine != null) ...[
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      flex: 4,
+                                      child: Text.rich(
+                                        TextSpan(
+                                          children: [
+                                            TextSpan(
+                                              text: episodeLine.code,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            if (episodeLine.name != null)
+                                              TextSpan(
+                                                text: ' · ${episodeLine.name}',
+                                                style: const TextStyle(
+                                                  color: Colors.white70,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                              _TvControlButton(
                                  onPressed: _openVideoInfoSheet,
                                  icon: const Icon(Icons.info_outline),
@@ -7543,36 +7585,17 @@ if (mounted) setState(_applySwipeValue);
                         // rendering the chip row if _inPip is true. The pip
                         // window must show ONLY the video — no chips, no
                         // network indicator, no title bar.
-                        if (!_inPip &&
-                            (chips.isNotEmpty || fileChipLabel != null)) ...[
-                          if (chips.isNotEmpty) ...[
-                            SizedBox(height: 4),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8),
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 4,
-                                children: chips,
-                              ),
+                        if (!_inPip && chips.isNotEmpty) ...[
+                          SizedBox(height: 4),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: chips,
                             ),
-                          ],
-                          if (fileChipLabel != null) ...[
-                            const SizedBox(height: 4),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8),
-                              child: FormatChip(
-                                label: fileChipLabel,
-                                color: const Color(0xFFE0E0E0),
-                                // The row is inset by 8 on each side; cap the
-                                // chip so a long episode name ellipsizes instead
-                                // of running to the screen edge.
-                                maxWidth:
-                                    MediaQuery.of(context).size.width - 32,
-                              ),
-                            ),
-                          ],
+                          ),
                         ],
                       ],
                     ),

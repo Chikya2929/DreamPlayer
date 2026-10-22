@@ -2901,6 +2901,30 @@ static int? _trailingPartNumber(String folderName) {
     );
   }
 
+  /// The cached entry for [meta]'s show that actually carries its episode
+  /// list, or null when no cached entry has one yet.
+  ///
+  /// Episodes are cached under the key the details screen fetched them with —
+  /// the season/show FOLDER key, passed down as `parentMetadataKey`.
+  /// [carryMeta] copies the matched show onto the file's own key so its title
+  /// and artwork resolve, but it does not copy `seasons`, so a lookup on the
+  /// player's file key alone finds no episode (the file/episode chip then had
+  /// only its bare `S01E05`). This widens the search to the other entries for
+  /// the same provider-qualified show — the player must not have to know the
+  /// folder key it was opened from.
+  TmdMeta? metaWithSeasons(TmdMeta? meta) {
+    if (meta == null) return null;
+    bool hasEpisodes(TmdMeta m) =>
+        m.seasons.values.any((s) => s.episodes.isNotEmpty);
+    if (hasEpisodes(meta)) return meta;
+    for (final candidate in _cache.values) {
+      if (identical(candidate, meta)) continue;
+      if (candidate.movie.providerKey != meta.movie.providerKey) continue;
+      if (hasEpisodes(candidate)) return candidate;
+    }
+    return null;
+  }
+
   /// Records a "Change poster" / "Change backdrop" pick and refreshes every
   /// card showing this item. The pick is applied by [metaFor] at read time, so
   /// it survives the next re-resolution.

@@ -667,14 +667,6 @@
   "@settingsBadgeResolution": {
     "description": "Badge option label"
   },
-  "settingsBadgeFileEpisode": "文件 / 剧集",
-  "@settingsBadgeFileEpisode": {
-    "description": "Badge option label"
-  },
-  "settingsBadgeFileEpisodeDesc": "S01E05 · 剧集名称",
-  "@settingsBadgeFileEpisodeDesc": {
-    "description": "Badge option subtitle"
-  },
   "settingsBadgePlayback": "Playback",
   "@settingsBadgePlayback": {
     "description": "Badge option label"
