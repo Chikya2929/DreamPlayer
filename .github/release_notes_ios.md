@@ -24,9 +24,10 @@ platform and carried engine/implementation detail.
 
 A section must only claim what is **actually in that build**, not what is on
 `main`. TestFlight 43 was commit `9d75ae3`; build 49 (commit `a550985`) added
-only the folder-first share ordering, and build 50 (commit `51aeb6d`) adds the
-file / episode label. Anything committed after the section's build belongs in
-the *next* section.
+only the folder-first share ordering; build 50 (`51aeb6d`) carried an earlier
+version of the episode label as a separate chip with its own setting, and build
+51 (`5a7b47d`) replaces it with the title line shipped here. Anything committed
+after the section's build belongs in the *next* section.
 
 An earlier draft of this file advertised chapter markers in 0.5.1, which was
 true of the intended build but not of the one that was reviewed. Verify with
@@ -46,10 +47,10 @@ New:
   films by name, release code or numeric ID, with poster art and details like
   any other match. It is off until you switch it on, covers films only, and
   titles that already match are unaffected.
-• An optional file label on the player. Turn on Settings → Player →
-  On-screen badges → File / episode and the player names the episode you are
-  watching, such as S02E05 · The Long Way Home, on its own line under the
-  format badges. It is off by default and has nothing to add for films.
+• The player now names the episode you are watching: the show title is
+  followed by the season and episode, such as S02E05 · The Long Way Home, on
+  the same line. The code appears for every episode, and the episode name
+  whenever one is available. Films are unchanged.
 
 Fixed:
 • The icon picker could fail to open on smaller screens.
