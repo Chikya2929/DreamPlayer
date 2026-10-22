@@ -792,6 +792,48 @@ only validates pbxproj shape — so the first iOS build must be checked on devic
 the exact change that bricked it. If you touch this, read the manifest comment
 block above the aliases first.
 
+### In-app updates (Android sideload) — why not Play Core
+
+Android builds are handed out as APKs from GitHub Releases, so Google's
+`in_app_update` / Play Core API is unusable: it only functions for apps
+installed **from Play**. The updater therefore does what Seal/Sealplus do —
+`lib/services/app_updater.dart` reads
+`api.github.com/repos/mangeshghodke/DreamPlayer/releases/latest`, compares the
+tag against `PackageInfo.version` and downloads the APK; the native half
+(`android/.../AppUpdater.kt`) only turns that file into an installer intent.
+
+- **Check policy**: at most once per 24 h on Home, 4 s after the first frame,
+  silent on any failure, and behind the same Settings toggle
+  (`dreamplayer.autoUpdateCheck`, default on) used by **Check for updates** in
+  Settings → About. **Skip this version** persists the tag. A successful check
+  writes `dreamplayer.lastUpdateCheck` even when the request failed — one
+  retry per day, not one per launch.
+- **Pick the ABI-named asset, never "the newest".** `release.yml` publishes
+  `DreamPlayer-<version>-{universal,arm64-v8a,armeabi-v7a,x86_64}.apk`, and
+  `--split-per-abi` sets `arm64 2043` against `universal 43`. Handing an
+  arm64-split user the universal APK is a **versionCode downgrade** and the
+  install is refused. `Build.SUPPORTED_ABIS[0]` chooses the asset; universal is
+  only the fallback for a release missing that ABI.
+- **Installing needs three things**, none optional: the
+  `REQUEST_INSTALL_PACKAGES` permission, a `FileProvider` (`…fileprovider`,
+  `res/xml/file_paths.xml` → `cacheDir/updates/`) because Android 7+ rejects
+  `file://` installer URIs, and the user's per-app **Allow from this source**
+  grant. The native `installApk` answers `permission_required` while that is
+  off; the dialog opens `ACTION_MANAGE_UNKNOWN_APP_SOURCES` and retries with
+  the already-downloaded file, so nothing is fetched twice.
+- **Versions before 0.5.2 need one uninstall.** Their APKs were signed by a
+  throwaway CI key (issue #43), so the installer fails with
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. The dialog says so up front when the
+  installed version is older; there is no way to install over them.
+- **Do not test the installer from a debug build.** `flutter build apk --debug`
+  is signed with the debug key, so installing a release APK over it always
+  fails — that is the key mismatch, not the updater. Verify the flow with a
+  local `--release` build installed after one uninstall, or accept that the
+  dialog/download/FileProvider step is proven and the final signature check is
+  the same one Play-free updates always face.
+- iOS shows none of this: the App Store owns updates there, and the Dart
+  service is `Platform.isAndroid`-gated.
+
 ### Android releases are updatable — the two guards that protect it (issue #43)
 
 An update fails in exactly two ways on Android: the **signer differs**, or the
@@ -2556,6 +2598,7 @@ lib/
   services/mpv_pip.dart           # libmpv fallback engine's picture-in-picture bridge (pipChanged/pipDismissed/pipPlayPause/pipRewind/pipForward; setState pushes state into PipManager)
   services/media_probe.dart       # native MediaExtractor probe via MethodChannel; probe() for smb/http/local, probeFile() for temp files, probeViaTempDownload() for ftp/sftp
   services/download_manager.dart  # DownloadManager singleton: HTTP+SMB download, progress tracking, SharedPreferences history, cancel/delete, one-at-a-time queue
+  services/app_updater.dart       # Android sideload updater: GitHub latest release, numeric version compare, ABI-matched asset, download + install
   services/series_grouping.dart   # cross-folder series grouping (baseNameOf/prefix merge, pure Dart, unit-tested)
   services/manual_groups.dart     # user-made manual groups (ManualGroup/ManualGroupsStore, prefs dreamplayer.manualGroups; select N cards → Group)
   services/default_engine_store.dart # dreamplayer.defaultEngine (Media3 / libmpv / ask)
@@ -2590,6 +2633,7 @@ lib/
     tv_overscan.dart            # overscan safe-area padding (36px sides, 20px top/bottom)
     tv_text_field.dart          # TV-friendly TextField with skipTraversal inner node
     episode_row.dart            # shared episode/file row + still & poster thumbs (issue #38)
+    update_dialog.dart          # in-app update sheet: notes, download progress, unknown-sources prompt, install retry
 android/app/src/main/kotlin/com/dreamplayer/app/
   ExoPlayerView.kt              # native PlayerView platform view + channels (open/play/seek/tracks/subtitles) + OkHttp permissive DataSource for self-signed WebDAV
   SubtitleFormats.kt            # extension->MIME map, sibling auto-pairing, VobSub pair detection, bounded charset sniff, UTF-8 re-encode

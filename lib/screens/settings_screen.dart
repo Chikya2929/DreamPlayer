@@ -30,6 +30,8 @@ import '../services/subtitle_prefs.dart';
 import '../services/support_links.dart';
 import '../services/mpv_downmix_store.dart';
 import '../services/app_icon_service.dart';
+import '../services/app_updater.dart';
+import '../widgets/update_dialog.dart';
 import '../services/tone_map_store.dart';
 import '../config/simkl_keys.dart';
 import '../services/simkl_client.dart';
@@ -78,6 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _subEncoding = 0;
   bool _autoFetchSubs = false;
   bool _autoExpandFolders = true;
+  bool _autoCheckUpdates = true;
   int _scanDepth = 5;
   bool _badgeEnabled = true;
   bool _badgeHdr = true;
@@ -126,6 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadTmdbKey();
     _loadTheTvdb();
     _loadAutoExpandFolders();
+    _loadAutoCheckUpdates();
   }
 
   Future<void> _loadOtherVideos() async {
@@ -189,6 +193,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadAutoCheckUpdates() async {
+    final enabled = await AppUpdater.autoCheckEnabled();
+    if (mounted) setState(() => _autoCheckUpdates = enabled);
+  }
+
+  Future<void> _checkForUpdates() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final update = await AppUpdater.check();
+      if (!mounted) return;
+      if (update == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('DreamPlayer is up to date.')),
+        );
+        return;
+      }
+      await showAppUpdateDialog(context, update);
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not check for updates. Try again later.')),
+      );
+    }
   }
 
   Future<void> _loadBadgePrefs() async {
@@ -1695,6 +1723,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : 'ExoPlayer (Media3) + FFmpeg',
                   ),
                 ),
+                if (Platform.isAndroid) ...[
+                  TvTile(
+                    leading: const Icon(Icons.system_update),
+                    title: const Text('Check for updates'),
+                    subtitle: const Text('Download the latest release'),
+                    onTap: _checkForUpdates,
+                  ),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.update),
+                    title: const Text('Check for updates'),
+                    value: _autoCheckUpdates,
+                    onChanged: (v) async {
+                      await AppUpdater.setAutoCheck(v);
+                      if (mounted) setState(() => _autoCheckUpdates = v);
+                    },
+                  ),
+                ],
                 TvTile(
                   leading: const Icon(Icons.info_outline),
                   title: Text(AppLocalizations.of(context).settingsVersion),

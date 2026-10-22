@@ -3,6 +3,19 @@
 All notable changes to DreamPlayer are documented here. Each release's entry is
 pulled into the GitHub Release body automatically by `.github/workflows/release.yml`.
 
+## Unreleased
+
+### Added
+
+- **In-app update prompt.** On Android the app now checks the GitHub release
+  feed at most once a day when it opens, and offers the newer build directly:
+  release notes, a download with progress, and the system installer. It picks
+  the APK matching the device's ABI, so a split install is never handed a
+  universal build (which Android would reject as a downgrade). Settings →
+  About gains **Check for updates** and an auto-check switch, and the prompt's
+  **Skip this version** is remembered. iOS is untouched — the App Store owns
+  updates there.
+
 ## 0.5.3
 
 ### Added

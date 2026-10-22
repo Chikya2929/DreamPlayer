@@ -14,6 +14,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- In-app updater: hands the downloaded release APK to the package
+         installer. Also needs the user's "install unknown apps" grant, which
+         is requested from system settings on API 26+. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- Android TV: show on leanback launchers; required=false keeps the APK
          installable on phones/tablets. -->
     <uses-feature android:name="android.software.leanback" android:required="false"/>
@@ -413,6 +417,18 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON"/>
             </intent-filter>
         </receiver>
+        <!-- Serves the downloaded update APK to the package installer. A file
+             path would be rejected by Android 7+; the installer needs a
+             content:// URI with a one-shot read grant. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

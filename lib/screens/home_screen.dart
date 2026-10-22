@@ -46,6 +46,8 @@ import 'file_browser_screen.dart';
 import 'jellyfin_screen.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/startup_permissions.dart';
+import '../services/app_updater.dart';
+import '../widgets/update_dialog.dart';
 import 'smb_screen.dart';
 import 'tmd_details_screen.dart';
 import 'movie_group_screen.dart';
@@ -128,7 +130,19 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       unawaited(requestStartupPermissions(context));
       _showTrialIntroIfNeeded();
+      unawaited(_maybeCheckForUpdates());
     });
+  }
+
+  /// Android sideload builds: ask GitHub Releases for a newer APK at most once
+  /// a day. Delayed past startup so it can never compete with the first frames,
+  /// and silent on failure.
+  Future<void> _maybeCheckForUpdates() async {
+    if (!AppUpdater.isSupported) return;
+    await Future<void>.delayed(const Duration(seconds: 4));
+    final update = await AppUpdater.checkIfDue();
+    if (update == null || !mounted) return;
+    await showAppUpdateDialog(context, update);
   }
 
   void _onMetadataChanged() {

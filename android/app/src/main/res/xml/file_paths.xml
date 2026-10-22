@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- The in-app updater downloads the release APK into cacheDir/updates and
+         hands that file to the system package installer through this provider. -->
+    <cache-path name="updates" path="updates/" />
+</paths>

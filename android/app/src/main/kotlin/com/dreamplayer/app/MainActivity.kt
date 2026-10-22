@@ -134,6 +134,9 @@ class MainActivity : FlutterActivity() {
         DownloadClient(this).configure(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dreamplayer/download"),
         )
+        AppUpdater(this).configure(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AppUpdater.CHANNEL),
+        )
         intentChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "dreamplayer/intent",
