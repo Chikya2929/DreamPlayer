@@ -1726,7 +1726,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (Platform.isAndroid) ...[
                   TvTile(
                     leading: const Icon(Icons.system_update),
-                    title: const Text('Check for updates'),
+                    title: const Text('Check now'),
                     subtitle: const Text('Download the latest release'),
                     onTap: _checkForUpdates,
                   ),
