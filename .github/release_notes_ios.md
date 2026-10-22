@@ -35,35 +35,27 @@ true of the intended build but not of the one that was reviewed. Verify with
 
 ## 0.5.2
 
-• **Choose your app icon.** Settings → Appearance → App icon now offers five
-  launcher icons on iPhone and iPad: the original logo and wordmark, the logo on
-  its own, and the logo in red, green or cyan. Pick one and it applies straight
-  away — no reinstall. The wordmark-free logo is handy when your device already
-  prints the app name underneath the icon.
+New:
+• Five app icons to choose from in Settings → Appearance. Pick the original logo
+  and wordmark, the logo on its own, or the logo in red, green or cyan; the
+  change applies straight away, with no reinstall. The wordmark-free logo is
+  handy when your device already prints the app name underneath the icon.
+• An optional second metadata catalogue in Settings → Metadata, for titles the
+  main catalogue does not carry. It needs no account, key or sign-in and matches
+  films by name, release code or numeric ID, with poster art and details like
+  any other match. It is off until you switch it on, covers films only, and
+  titles that already match are unaffected.
 
-• **An extra metadata source, for titles the main catalogue does not carry.**
-  Settings → Metadata now offers a second, optional catalogue. It needs no
-  account, key or sign-in, and it matches films by name, release code or numeric
-  ID, with poster art and details like any other match. It is off until you
-  switch it on, and you can switch it off again at any time; titles that already
-  match are not affected. It covers films only, so television folders keep using
-  the main catalogue.
-
-• Fixed a problem that could stop the icon picker from opening on smaller
-  screens.
-
+Fixed:
+• The icon picker could fail to open on smaller screens.
 • The file browser no longer offers a Delete option on iPhone and iPad, where it
   had no effect.
-
 • Pulling down to refresh the list of shared folders no longer reports that the
   folder could not be read.
-
-• Every shared folder on the server now appears in the list, not just ones with
-  common names.
-
+• Every shared folder on the server now appears in the list, not just folders
+  with common names.
 • Restoring a purchase now asks the App Store directly and re-reads what your
   account owns, instead of relying on a delayed notification.
-
 • Folders now come before files when you browse a shared folder, each in
   alphabetical order.
 
