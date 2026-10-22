@@ -40,3 +40,62 @@ bool titleIsEpisodeCode({
     parsed.season > 0 &&
     parsed.episode > 0 &&
     title == episodeCode(parsed.season, parsed.episode);
+
+/// The player's file-identity chip: `S01E05 · Episode name`.
+///
+/// Eye-readable identity for the file that is playing, under the format chips.
+/// The title line above it carries the SHOW title, so without this an episode
+/// is anonymous once playback starts.
+///
+/// [seasonNumber]/[episodeNumber] are the structured numbers a server supplies
+/// (Jellyfin) and they WIN over the file name: a Jellyfin item's title is the
+/// episode name, so it carries no `SxxEyy` to parse. Otherwise the numbers come
+/// from the name. [folderSeason] covers anime folders with no season tag
+/// (`[01]`), and [firstAvailableSeason] is the last resort so a show with only
+/// season 4 cached labels `S04E01`, not `S01E01`.
+///
+/// Returns null for anything that is not an episode: a movie's identity is
+/// already the title line, and repeating it as a chip is noise. A missing
+/// episode name still yields the code (`S01E05`), never an empty chip.
+String? fileEpisodeChipLabel({
+  required String title,
+  int? seasonNumber,
+  int? episodeNumber,
+  int? folderSeason,
+  int? firstAvailableSeason,
+  String? Function(int season, int episode)? nameOf,
+}) {
+  final int season;
+  final int episode;
+  final structuredSeason = seasonNumber;
+  final structuredEpisode = episodeNumber;
+  if (structuredSeason != null &&
+      structuredSeason > 0 &&
+      structuredEpisode != null &&
+      structuredEpisode > 0) {
+    season = structuredSeason;
+    episode = structuredEpisode;
+  } else {
+    final parsed = ParsedFileName.parse(title);
+    if (!parsed.isEpisode || parsed.episode <= 0) return null;
+    // Never invent a season. `E05` / `[05]` names and anime folders carry no
+    // season of their own, and `seasonWithFallback` defaults to 1 — which
+    // would label a season-4 file "S01E05". The folder's TMDB season match
+    // and the first season actually cached are the two trustworthy sources;
+    // with neither, no chip is better than a wrong code.
+    final fallbackSeason = parsed.hasExplicitSeason
+        ? parsed.season
+        : (folderSeason != null && folderSeason > 0)
+            ? folderSeason
+            : (firstAvailableSeason != null && firstAvailableSeason > 0)
+                ? firstAvailableSeason
+                : 0;
+    if (fallbackSeason <= 0) return null;
+    season = fallbackSeason;
+    episode = parsed.episode;
+  }
+  if (season <= 0 || episode <= 0) return null;
+  final name = nameOf?.call(season, episode)?.trim() ?? '';
+  final code = episodeCode(season, episode);
+  return name.isEmpty ? code : '$code · $name';
+}

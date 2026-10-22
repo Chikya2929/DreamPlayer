@@ -12,6 +12,8 @@ class BadgePrefs {
   static const _kAudio = 'badge_audio';
   static const _kResolution = 'badge_resolution';
   static const _kVideoCodec = 'badge_video_codec';
+  // Content badges
+  static const _kFileEpisode = 'badge_file_episode';
   // Playback state badges
   static const _kSpatialAudio = 'badge_spatial_audio';
   static const _kServerTranscode = 'badge_server_transcode';
@@ -27,6 +29,8 @@ class BadgePrefs {
       (await SharedPreferences.getInstance()).getBool(_kResolution) ?? false;
   static Future<bool> videoCodec() async =>
       (await SharedPreferences.getInstance()).getBool(_kVideoCodec) ?? false;
+  static Future<bool> fileEpisode() async =>
+      (await SharedPreferences.getInstance()).getBool(_kFileEpisode) ?? false;
   static Future<bool> spatialAudio() async =>
       (await SharedPreferences.getInstance()).getBool(_kSpatialAudio) ?? true;
   static Future<bool> serverTranscode() async =>
@@ -44,6 +48,8 @@ class BadgePrefs {
       (await SharedPreferences.getInstance()).setBool(_kResolution, v);
   static Future<void> setVideoCodec(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kVideoCodec, v);
+  static Future<void> setFileEpisode(bool v) async =>
+      (await SharedPreferences.getInstance()).setBool(_kFileEpisode, v);
   static Future<void> setSpatialAudio(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kSpatialAudio, v);
   static Future<void> setServerTranscode(bool v) async =>
@@ -60,6 +66,7 @@ class BadgePrefs {
       audio: p.getBool(_kAudio) ?? true,
       resolution: p.getBool(_kResolution) ?? false,
       videoCodec: p.getBool(_kVideoCodec) ?? false,
+      fileEpisode: p.getBool(_kFileEpisode) ?? false,
       spatialAudio: p.getBool(_kSpatialAudio) ?? true,
       serverTranscode: p.getBool(_kServerTranscode) ?? true,
       decoder: p.getBool(_kDecoder) ?? false,
@@ -74,6 +81,7 @@ class BadgeFlags {
     required this.audio,
     required this.resolution,
     required this.videoCodec,
+    required this.fileEpisode,
     required this.spatialAudio,
     required this.serverTranscode,
     required this.decoder,
@@ -84,6 +92,7 @@ class BadgeFlags {
   final bool audio;
   final bool resolution;
   final bool videoCodec;
+  final bool fileEpisode;
   final bool spatialAudio;
   final bool serverTranscode;
   final bool decoder;

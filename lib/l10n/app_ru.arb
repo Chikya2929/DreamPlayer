@@ -667,6 +667,14 @@
   "@settingsBadgeResolution": {
     "description": "Badge option label"
   },
+  "settingsBadgeFileEpisode": "Файл / эпизод",
+  "@settingsBadgeFileEpisode": {
+    "description": "Badge option label"
+  },
+  "settingsBadgeFileEpisodeDesc": "S01E05 · название эпизода",
+  "@settingsBadgeFileEpisodeDesc": {
+    "description": "Badge option subtitle"
+  },
   "settingsBadgePlayback": "Playback",
   "@settingsBadgePlayback": {
     "description": "Badge option label"

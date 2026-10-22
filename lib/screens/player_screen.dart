@@ -40,6 +40,7 @@ import '../services/opensubtitles_client.dart';
 import '../services/open_intent.dart';
 import '../services/download_manager.dart';
 import '../utils/chapter_nav.dart';
+import '../utils/episode_label.dart';
 import '../utils/screen_orientation.dart';
 import '../utils/mpv_audio_select.dart';
 import '../utils/mpv_volume.dart';
@@ -305,6 +306,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _badgeSpatialAudio = true;
   bool _badgeServerTranscode = true;
   bool _badgeDecoder = false;
+
+  /// File-identity chip (`S01E05 · Episode name`). Opt-in: a movie has no
+  /// episode code and its title is already the line above, so this stays off
+  /// unless the user asks for it under Settings → Player → On-screen badges.
+  bool _badgeFileEpisode = false;
 
   /// Saved audio track to restore after the next open (index for Media3,
   /// track id string for MPV). Set from [AudioTrackStore] in [_openCurrent]
@@ -692,6 +698,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _badgeSpatialAudio = bf.spatialAudio;
       _badgeServerTranscode = bf.serverTranscode;
       _badgeDecoder = bf.decoder;
+      _badgeFileEpisode = bf.fileEpisode;
     } catch (_) {}
     _markedWatched = false;
     _autoPlayFired = false;
@@ -6779,6 +6786,32 @@ if (mounted) setState(_applySwipeValue);
     return _current.audioCodecLabel;
   }
 
+  /// `S01E05 · Episode name` for the file chip below the format chips, or
+  /// null when it does not apply (a movie, an unparseable name, or no
+  /// metadata yet). Reads the cached episode title only — no network here:
+  /// the details screen and the folder prefetch have already filled it, and
+  /// the chip still works from the code alone when they have not.
+  String? get _fileChipLabel {
+    final meta = _tmdbMeta;
+    return fileEpisodeChipLabel(
+      title: _current.title,
+      seasonNumber: _current.seasonNumber,
+      episodeNumber: _current.episodeNumber,
+      folderSeason: meta?.folderSeason,
+      firstAvailableSeason: _firstCachedSeason(meta),
+      nameOf: (season, episode) => meta?.seasons[season]?.episode(episode)?.name,
+    );
+  }
+
+  /// Lowest cached season above 0 — `seasons.keys.first` can be season 0
+  /// (specials), which never labels an episode correctly.
+  int? _firstCachedSeason(TmdMeta? meta) {
+    for (final season in meta?.seasons.keys ?? const <int>[]) {
+      if (season > 0) return season;
+    }
+    return null;
+  }
+
   String? get _resolutionInfoLabel {
     if (_mpvReady) return _mpvResolution;
     return _liveResolution ?? _current.resolution;
@@ -6895,6 +6928,13 @@ if (mounted) setState(_applySwipeValue);
         }
       }
     }
+
+    // File identity gets its own row under the format chips: an episode name
+    // can be long, and wrapping it into the same `Wrap` would push the format
+    // chips around as the name changes length. Gated by the master toggle too,
+    // so "badges off" still means no chips at all.
+    final fileChipLabel =
+        _badgeEnabled && _badgeFileEpisode ? _fileChipLabel : null;
 
     // IMPORTANT: keep the widget-tree shape stable across casting state.
     // The platform view must ALWAYS be mounted at the same slot — swapping
@@ -7503,17 +7543,36 @@ if (mounted) setState(_applySwipeValue);
                         // rendering the chip row if _inPip is true. The pip
                         // window must show ONLY the video — no chips, no
                         // network indicator, no title bar.
-                        if (!_inPip && chips.isNotEmpty) ...[
-                          SizedBox(height: 4),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: chips,
+                        if (!_inPip &&
+                            (chips.isNotEmpty || fileChipLabel != null)) ...[
+                          if (chips.isNotEmpty) ...[
+                            SizedBox(height: 4),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: chips,
+                              ),
                             ),
-                          ),
+                          ],
+                          if (fileChipLabel != null) ...[
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              child: FormatChip(
+                                label: fileChipLabel,
+                                color: const Color(0xFFE0E0E0),
+                                // The row is inset by 8 on each side; cap the
+                                // chip so a long episode name ellipsizes instead
+                                // of running to the screen edge.
+                                maxWidth:
+                                    MediaQuery.of(context).size.width - 32,
+                              ),
+                            ),
+                          ],
                         ],
                       ],
                     ),

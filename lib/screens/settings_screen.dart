@@ -87,6 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _badgeSpatialAudio = true;
   bool _badgeServerTranscode = true;
   bool _badgeDecoder = false;
+  bool _badgeFileEpisode = false;
   String _tmdbKey = '';
   String _theTvdbKey = '';
   String _theTvdbPin = '';
@@ -204,6 +205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _badgeSpatialAudio = f.spatialAudio;
           _badgeServerTranscode = f.serverTranscode;
           _badgeDecoder = f.decoder;
+          _badgeFileEpisode = f.fileEpisode;
         });
       }
     } catch (_) {}
@@ -1364,6 +1366,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 if (mounted) setState(() => _badgeSpatialAudio = v);
                               },
                             ),
+                          _BadgeToggle(
+                            icon: Icons.movie_filter,
+                            label: AppLocalizations.of(context)
+                                .settingsBadgeFileEpisode,
+                            subtitle: AppLocalizations.of(context)
+                                .settingsBadgeFileEpisodeDesc,
+                            value: _badgeFileEpisode,
+                            onChanged: (v) async {
+                              await BadgePrefs.setFileEpisode(v);
+                              if (mounted) setState(() => _badgeFileEpisode = v);
+                            },
+                          ),
                           _BadgeToggle(
                             icon: Icons.sync,
                             label: AppLocalizations.of(context).settingsBadgeTranscoding,

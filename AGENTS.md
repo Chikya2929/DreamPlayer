@@ -625,6 +625,24 @@ A video player app supporting:
 
 - **Embedded cover-art thumbnails (2026-08-26)**: video cards show the file's **embedded artwork** (MKV attached pictures / MP4 `covr`) instead of the plain gradient. `FileBrowser.getThumbnail` (`dreamplayer/files`) reads **metadata only** — `MediaMetadataRetriever.getEmbeddedPicture` (Android) / `AVURLAsset` `commonMetadata` `commonKeyArtwork` (iOS; MKV attachments unreadable there, MP4/MOV only) — never `getFrameAtTime`, which returns black frames for DV/HDR (do not add frame-extracting thumbnails). Local sources only (path / `file:` / `content:` / `tree:`); remote (SMB/WebDAV/Jellyfin/HTTP) skip the probe. `ThumbnailStore` (`lib/services/thumbnail_store.dart`) caches bytes in memory + disk (`<tmp>/cover_art/<fnv1a32hex>-<tail≤24>.img`), negative-cache in-memory only, keyed by `TmdStore.identityKeyFor` (same key as the details screen). TMDB backdrop still wins on continue-watching cards — embedded art renders only when there's no TMDB match. **Deadlock gotcha**: `future.whenComplete(() => map.remove(key))` DEADLOCKS — the arrow returns `Map.remove`'s value, which IS the same future (it waits on itself); use a block body `{ _inFlight.remove(key); }`. Probe failures/timeouts (10 s guard) just leave the gradient.
 
+- **File-identity chip on the player (2026-10-22)**: the top bar's title is the
+  SHOW title, so an episode was anonymous once playback started. Settings →
+  Player → On-screen badges → "File / episode" (`BadgePrefs.fileEpisode`,
+  `badge_file_episode`, **off by default**) adds `S01E05 · Episode name` on its
+  own row under the format chips, gated by the master badge toggle and `_inPip`
+  like every other chip. Resolution is `fileEpisodeChipLabel` in
+  `lib/utils/episode_label.dart` (10 unit tests): structured Jellyfin
+  season/episode wins over the name (a Jellyfin title IS the episode name, so it
+  has no `SxxEyy`), then `ParsedFileName`; the name is read from cached
+  `seasons[s]?.episode(e)?.name` only — no request — and a missing name yields
+  the bare code. **It never invents a season**: `E05`/`[01]` names and anime
+  folders need `folderSeason` or the first cached season **above 0**, because
+  `seasonWithFallback` defaults to 1 and would label a season-4 file `S01E05`
+  (the details screen can accept that default; a chip cannot). `seasons.keys.first`
+  can be season 0 (specials), hence the positive-first scan. Long names are
+  capped by the new optional `FormatChip.maxWidth`, which sets `maxLines: 1` +
+  ellipsis — unset (the default) leaves the existing short format chips exactly
+  as they were; a wrapped `Text` would make one chip taller than its neighbours.
 - **Transient format chips + Video info sheet (2026-08-26)**: the top-bar chips (HDR / video / audio / resolution / decoder / transcode / boost / night / spatial) no longer persist — they **flash for 5 s on the first STATE_READY per open** (`_flashChips`, `_chipsFlashedForOpen` latch reset in `_openCurrent`), fade via `AnimatedOpacity` + `IgnorePointer`, and are force-hidden on pip entry. The top-bar **ⓘ button** (right corner, `_TvControlButton` so the TV D-pad reaches it) opens a read-only **"Video info" sheet**: Title / HDR / Video / Audio (· Passthrough) / Resolution / **Decoder** (full component name + hardware/software — previously only in a chip tooltip) / Stream (server transcoding) / Spatial audio / Volume boost / Night mode / Bass boost. Motivation: persistent badges cluttered long sessions and leaked into the pip window. Labels shared with the chips through `_videoCodecInfoLabel` / `_audioInfoLabel` / `_resolutionInfoLabel` getters (DV dedup included).
 
 - **NEVER put `Spacer()`/`Expanded()` inside AlertDialog `actions` (2026-08 gotcha, broke every network-server dialog)**: `AlertDialog` lays `actions` out in an **OverflowBar**, not a Flex — a Flex child there throws `Incorrect use of ParentDataWidget … Expanded wants FlexParentData, found _OverflowBarParentData` while mounting and the whole dialog form dies (user-visible: "only the Test button, no input fields" on FTP/WebDAV/Jellyfin/SMB add-server dialogs). The four dialogs had a `const Spacer()` between Test and Cancel for push-right spacing; fix: removed them + `actionsAlignment: MainAxisAlignment.spaceBetween` in the shared `serverDialog()` helper (`lib/widgets/server_form_kit.dart`). Regression-tested in `test/server_dialog_layout_test.dart`, which pumps both dialogs at phone + iPad portrait/landscape sizes and asserts all 6 TextFields mount at full height (≥40 px) — this test is what caught the bug; label-Text heights are NOT a valid size proxy (a floating label is naturally ~16 px).

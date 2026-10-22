@@ -521,6 +521,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsBadgeResolution => 'Resolution';
 
   @override
+  String get settingsBadgeFileEpisode => '文件 / 剧集';
+
+  @override
+  String get settingsBadgeFileEpisodeDesc => 'S01E05 · 剧集名称';
+
+  @override
   String get settingsBadgePlayback => 'Playback';
 
   @override

@@ -675,6 +675,14 @@
   "@settingsBadgeResolution": {
     "description": "Badge option label"
   },
+  "settingsBadgeFileEpisode": "File / episode",
+  "@settingsBadgeFileEpisode": {
+    "description": "Badge option label"
+  },
+  "settingsBadgeFileEpisodeDesc": "S01E05 · episode name",
+  "@settingsBadgeFileEpisodeDesc": {
+    "description": "Badge option subtitle"
+  },
   "settingsBadgePlayback": "Playback",
   "@settingsBadgePlayback": {
     "description": "Badge option label"

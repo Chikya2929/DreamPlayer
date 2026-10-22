@@ -1095,6 +1095,18 @@ abstract class AppLocalizations {
   /// Badge option label
   ///
   /// In en, this message translates to:
+  /// **'File / episode'**
+  String get settingsBadgeFileEpisode;
+
+  /// Badge option subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'S01E05 · episode name'**
+  String get settingsBadgeFileEpisodeDesc;
+
+  /// Badge option label
+  ///
+  /// In en, this message translates to:
   /// **'Playback'**
   String get settingsBadgePlayback;
 

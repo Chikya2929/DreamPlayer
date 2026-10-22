@@ -5,6 +5,18 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ## 0.5.3
 
+### Added
+
+- **File-identity chip on the player.** Settings → Player → On-screen badges
+  has a new **File / episode** option (off by default). With it on, the player
+  shows `S01E05 · Tarnished Cities` on its own row under the format chips, so
+  the episode being played is readable even though the title line carries the
+  show name. The name comes from metadata that is already cached — no extra
+  request — with the bare code as the fallback when the episode has no cached
+  name, and nothing at all for movies. It never guesses a season: an
+  episode-only name (`E05`, `[01]`) needs the folder's matched season or a
+  cached season to resolve, so a season-4 file is never labelled `S01E05`.
+
 ### Changed
 
 - **Volume boost is now a gesture, not a slider.** Settings → Audio has a new

@@ -522,6 +522,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsBadgeResolution => 'Resolution';
 
   @override
+  String get settingsBadgeFileEpisode => 'File / episode';
+
+  @override
+  String get settingsBadgeFileEpisodeDesc => 'S01E05 · episode name';
+
+  @override
   String get settingsBadgePlayback => 'Playback';
 
   @override
