@@ -21,7 +21,7 @@ that copying a block for App Store Connect can never pick up a stray note:
 
 ---
 
-## 0.5.2 (build 49)
+## 0.5.2 (build 50)
 
 New:
 • Five app icons to choose from in Settings → Appearance. Pick the original logo
@@ -33,6 +33,10 @@ New:
   films by name, release code or numeric ID, with poster art and details like
   any other match. It is off until you switch it on, covers films only, and
   titles that already match are unaffected.
+• An optional file label on the player. Turn on Settings → Player →
+  On-screen badges → File / episode and the player names the episode you are
+  watching, such as S02E05 · The Long Way Home, on its own line under the
+  format badges. It is off by default and has nothing to add for films.
 
 Fixed:
 • The icon picker could fail to open on smaller screens.
