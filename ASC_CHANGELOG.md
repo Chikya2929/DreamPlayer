@@ -16,8 +16,31 @@ that copying a block for App Store Connect can never pick up a stray note:
 
 | Version | Build | Characters (limit 4000) |
 |---|---|---|
+| 0.5.4 | 56 | 1020 |
 | 0.5.2 | 51 | 1547 |
 | 0.5.1 | 36 | 3833 |
+
+---
+
+## 0.5.4 (build 56)
+
+New:
+• Subtitles now look the way you want them to. Settings → Subtitles covers the
+  font, size, text colour and opacity, background colour and opacity, edge
+  style (outline, drop shadow or none), vertical position and sync delay, with
+  a live preview that updates as you go. Every text subtitle format follows the
+  style; image-based subtitles keep their own artwork. The same screen is one
+  tap away from the player's subtitle menu.
+• The subtitle font list now includes the full Google Fonts catalogue, with
+  search and every name previewed in its own typeface, plus nine families that
+  are built into the app and work with no connection at all. A chosen family
+  applies to the video itself, not only to the preview — including while
+  watching something from a shared folder.
+
+Fixed:
+• A font downloaded from the catalogue could be ignored by the player and the
+  subtitles would fall back to the default typeface. Families whose names
+  contain a space were the most likely to hit this.
 
 ---
 

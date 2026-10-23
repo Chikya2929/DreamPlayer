@@ -3,7 +3,7 @@
 All notable changes to DreamPlayer are documented here. Each release's entry is
 pulled into the GitHub Release body automatically by `.github/workflows/release.yml`.
 
-## Unreleased
+## 0.5.4
 
 ### Added
 
