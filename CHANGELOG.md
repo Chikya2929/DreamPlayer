@@ -22,7 +22,10 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   The iPad preview previously ignored the font choice because it asked for
   generic web font names that iOS does not have; it now uses the same system
   families playback does, and a chosen Google or bundled family now reaches
-  the video instead of falling back to the system font.
+  the video instead of falling back to the system font. A family downloaded
+  at runtime is identified by the font file's own name table rather than its
+  cache filename, so multi-word families (`Playfair Display`, `Fira Code`)
+  apply too.
 - **In-app update prompt.** On Android the app now checks the GitHub release
   feed at most once a day when it opens, and offers the newer build directly:
   release notes, a download with progress, and the system installer. It picks
