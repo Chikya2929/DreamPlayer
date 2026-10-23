@@ -163,17 +163,18 @@ private final class SubtitleOverlayView: UIView {
             SBMLog.log("subtitle font: no CoreText descriptor for \(url.lastPathComponent)")
             return nil
         }
+        // `CTFontCopyPostScriptName` is the accessor that exists on every
+        // deployment target — there is no `kCTFontPostScriptNameAttribute`
+        // constant in CoreText (the build fails with "cannot find in scope"),
+        // and `kCTFontNameAttribute` is the FULL name, which is the wrong one.
+        let font = CTFontCreateWithFontDescriptor(descriptor, 12, nil)
         var candidates: [String] = []
-        for attribute in [
-            kCTFontPostScriptNameAttribute,
-            kCTFontNameAttribute,
-            kCTFontFamilyNameAttribute,
-        ] {
-            if let name = CTFontDescriptorCopyAttribute(descriptor, attribute) as? String,
-               !name.isEmpty, !candidates.contains(name)
-            {
-                candidates.append(name)
-            }
+        for name in [
+            CTFontCopyPostScriptName(font) as String,
+            CTFontCopyFullName(font) as String,
+            CTFontCopyFamilyName(font) as String,
+        ] where !name.isEmpty && !candidates.contains(name) {
+            candidates.append(name)
         }
         for name in candidates where UIFont(name: name, size: 12) != nil {
             SBMLog.log(
