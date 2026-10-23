@@ -1077,7 +1077,9 @@ video drew at 2x and covered half the picture. It is now `no`.
   `smb_debug.log` (`subtitle font: <file> -> <name>`, or `register failed …`)
   and `app_debug.log` (`SUBFONT <family> -> bundled asset|cached file|
   downloaded file|NO FILE|discarding stale copy`), because there is no Mac in
-  the loop.
+  the loop. **Verified on-device (iPad, 0.5.4 build 56): a runtime-downloaded
+  family now reaches the player; bundled ones already did**, which is what
+  narrowed the bug to file resolution rather than the CoreText path.
 
   **Paywall (#36).** Fonts are part of subtitle styling, so the gate stays on
   the ONE route into `SubtitleSettingsScreen` (`player_screen.dart` CC sheet →
