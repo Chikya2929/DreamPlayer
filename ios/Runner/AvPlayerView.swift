@@ -154,7 +154,17 @@ private final class SubtitleOverlayView: UIView {
         }
         let url = URL(fileURLWithPath: path)
         var error: Unmanaged<CFError>?
-        CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+        let registered = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+        if let error {
+            // A failure here is invisible otherwise: the descriptors below can
+            // still be read from the URL, but nothing is added to the font
+            // registry, so `UIFont(name:)` returns nil and the overlay falls
+            // back to the system font. Log the reason.
+            SBMLog.log(
+                "subtitle font: register failed \(url.lastPathComponent)"
+                    + " registered=\(registered) \(error.takeRetainedValue())"
+            )
+        }
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL)
                 as? [CTFontDescriptor],

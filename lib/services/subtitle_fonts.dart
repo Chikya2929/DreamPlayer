@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../utils/ttf_names.dart';
 import 'app_debug_log.dart';
 
 /// Resolves a Google Fonts family to a **font file** the native subtitle
@@ -89,7 +90,17 @@ class SubtitleFonts {
       if (dirPath == null) return null;
       final target = File('$dirPath/${_fileStem(family)}.ttf');
       if (await target.exists() && await target.length() > 0) {
-        return target.path;
+        // A copy made earlier can be wrong (a loose match, a truncated
+        // write). Ask the file what it is instead of trusting its name —
+        // otherwise one bad copy is reused on every open, forever.
+        final names = ttfNameTableNames(await target.readAsBytes());
+        if (names.any((n) => fontNameMatches(n, family))) {
+          return target.path;
+        }
+        AppDebugLog.mark(
+          'SUBFONT $family -> discarding stale copy (${names.take(3).join(",")})',
+        );
+        await target.delete();
       }
 
       final asset = bundled[family];
@@ -145,21 +156,67 @@ class SubtitleFonts {
     } catch (_) {}
   }
 
-  /// google_fonts stores downloads in the app-support directory as
-  /// `<Family>_regular_<sha256>.ttf`. Finds that file if it exists.
-  static Future<File?> _googleFontsCacheFile(String family) async {
+  /// The `.ttf`/`.otf` files `google_fonts` has cached, whatever they are
+  /// called. Downloads land in the app-support directory as
+  /// `<Family>_regular_<sha256>.ttf`; the subtitle font copies live one level
+  /// down in `subtitle_fonts/`, which is harmless to include.
+  static Future<List<File>> _cachedFontFiles() async {
+    final out = <File>[];
     try {
       final support = await getApplicationSupportDirectory();
-      final prefix = '${family}_regular_';
-      await for (final entity in Directory(support.path).list()) {
-        if (entity is File) {
-          final name = entity.uri.pathSegments.last;
-          if (name.startsWith(prefix) && name.endsWith('.ttf')) {
-            return entity;
-          }
-        }
+      await for (final entity
+          in Directory(support.path).list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        final lower = entity.path.toLowerCase();
+        if (!lower.endsWith('.ttf') && !lower.endsWith('.otf')) continue;
+        out.add(entity);
+        if (out.length >= 400) break;
       }
-    } catch (_) {}
-    return null;
+    } catch (_) {
+      // Keep whatever was found: a listing that throws part-way (a sandbox
+      // restriction on one entry) must not read as "the cache is empty".
+    }
+    return out;
+  }
+
+  static String _basename(String path) =>
+      path.split(Platform.pathSeparator).last;
+
+  /// The cached download for [family].
+  ///
+  /// Convention first (cheap), then the font's own `name` table. The second
+  /// pass is what makes this reliable on iOS: `entity.uri.pathSegments`
+  /// percent-encodes spaces, so `Playfair Display_regular_….ttf` never matched
+  /// the old prefix check, and any future naming change would silently break
+  /// font application again. Asking the file what family it carries cannot.
+  static Future<File?> _googleFontsCacheFile(String family) async {
+    final files = await _cachedFontFiles();
+    if (files.isEmpty) return null;
+
+    final prefix = '${family}_regular_';
+    for (final file in files) {
+      final name = _basename(file.path);
+      if (name.startsWith(prefix) && name.toLowerCase().endsWith('.ttf')) {
+        return file;
+      }
+    }
+
+    File? loose;
+    for (final file in files) {
+      try {
+        final names = ttfNameTableNames(await file.readAsBytes());
+        if (!names.any((n) => fontNameMatches(n, family))) continue;
+        // Prefer the Regular face when several weights were cached (the
+        // picker previews a family by downloading only Regular, so this is
+        // normally the only one).
+        if (_basename(file.path).toLowerCase().contains('_regular_')) {
+          return file;
+        }
+        loose ??= file;
+      } catch (_) {
+        continue;
+      }
+    }
+    return loose;
   }
 }
