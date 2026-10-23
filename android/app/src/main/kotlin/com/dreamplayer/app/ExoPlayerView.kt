@@ -1650,6 +1650,7 @@ class ExoPlayerView(
                         (call.argument<Number>("delayMs")?.toLong()) ?: 0L,
                         (call.argument<Number>("vPos")?.toInt()) ?: 20,
                         (call.argument<Number>("bgOpacity")?.toInt()) ?: 128,
+                        call.argument<String>("fontPath"),
                     )
                     result.success(null)
                 }
@@ -2299,6 +2300,7 @@ class ExoPlayerView(
         delayMs: Long = 0L,
         vPos: Int = 20,
         bgOpacity: Int = 128,
+        fontPath: String? = null,
     ) {
         SubtitleTiming.delayUs = delayMs * 1000L
         // Remembered even if the view is not up yet, so the first open() still
@@ -2328,8 +2330,20 @@ class ExoPlayerView(
         } else {
             Color.TRANSPARENT
         }
-        // Caption font family. `null` keeps Media3's default typeface.
-        val typeface = when (font) {
+        // Caption font family. A Google Fonts choice arrives as a TTF file
+        // (Dart copies bundled assets out of the APK); `null` keeps Media3's
+        // default typeface. A bad path must never break playback, so it falls
+        // back to the built-in family map.
+        val fromFile = fontPath?.takeIf { it.isNotEmpty() }?.let { path ->
+            try {
+                val file = java.io.File(path)
+                if (file.exists()) Typeface.createFromFile(file) else null
+            } catch (e: Exception) {
+                Log.w("ExoPlayerView", "subtitle font file failed: $path", e)
+                null
+            }
+        }
+        val typeface = fromFile ?: when (font) {
             "sans" -> Typeface.create("sans-serif", Typeface.NORMAL)
             "serif" -> Typeface.create("serif", Typeface.NORMAL)
             "mono" -> Typeface.create("monospace", Typeface.NORMAL)

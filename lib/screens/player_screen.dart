@@ -34,6 +34,7 @@ import '../services/mpv_pip.dart';
 import '../services/mpv_surface_view.dart';
 import '../services/mpv_downmix_store.dart';
 import '../services/tone_map_store.dart';
+import '../services/subtitle_fonts.dart';
 import '../services/subtitle_style.dart';
 import '../services/downloaded_subtitles_store.dart';
 import '../services/opensubtitles_client.dart';
@@ -1696,6 +1697,15 @@ Future<void> _offerVc1Mpv() async {
     if (platform is! NativePlayer || _inTests) return;
     final s = _subtitleStyle;
     try {
+      // A Google family has to exist as a file for libass; resolvePath copies
+      // bundled assets out (offline) or reuses google_fonts' download cache.
+      final fontDir = await SubtitleFonts.directoryPath();
+      if (fontDir != null) {
+        await platform.setProperty('sub-fonts-dir', fontDir);
+      }
+      if (s.googleFont != null) {
+        await SubtitleFonts.resolvePath(s.googleFont);
+      }
       // Size: our multiplier maps to mpv's sub-scale (1.0 = default).
       await platform.setProperty('sub-scale', '${s.sizeMultiplier}');
       // mpv uses #AARRGGBB hex colors (not ASS &HBBGGRR).
@@ -1717,8 +1727,9 @@ Future<void> _offerVc1Mpv() async {
         await platform.setProperty('sub-back-color', '#00000000');
       }
       // Font family. mpv resolves these names through its font provider and
-      // falls back to its default when a family is missing.
-      final mpvFont = switch (s.font) {
+      // falls back to its default when a family is missing. A Google family
+      // wins because it is the more explicit choice.
+      final mpvFont = s.googleFont ?? switch (s.font) {
         SubtitleFont.serif => 'serif',
         SubtitleFont.monospace => 'monospace',
         SubtitleFont.system ||

@@ -3,6 +3,7 @@ import AVKit
 import AetherEngine
 import AetherEngineSMB
 import Combine
+import CoreText
 import Flutter
 import MediaPlayer
 import UIKit
@@ -75,6 +76,11 @@ private final class SubtitleOverlayView: UIView {
     private var boxColor: UIColor = .clear
     private var edgeStyle: String = "outline"
     private var fontStyle: String = "system"
+    /// Absolute path of the TTF backing a Google Fonts choice, plus the
+    /// PostScript name CoreText reports for it (`UIFont(name:)` needs the
+    /// latter, not the family display name).
+    private var fontFilePath: String = ""
+    private var fileFontName: String?
 
     /// Applies the user's subtitle appearance from Dart (`setSubtitleStyle`).
     /// - `size` multiplies the base glyph size.
@@ -84,6 +90,8 @@ private final class SubtitleOverlayView: UIView {
     /// - `font` is one of system/sans/serif/mono/casual/cursive.
     /// - `edge` is none/outline/shadow/raised/depressed.
     /// - `verticalPosition` 0–255 (0 = bottom, 255 = top, default 20).
+    /// - `fontPath` is an absolute TTF path for a Google Fonts family; empty
+    ///   means the built-in family map is used.
     func applyStyle(
         size: Double,
         color: Int,
@@ -92,11 +100,18 @@ private final class SubtitleOverlayView: UIView {
         verticalPosition: Int = 20,
         bgOpacity: Int = 128,
         font: String = "system",
-        edge: String = "outline"
+        edge: String = "outline",
+        fontPath: String = ""
     ) {
         self.verticalPosition = verticalPosition
         self.styleSize = size
         self.fontStyle = font
+        if fontPath != fontFilePath {
+            fontFilePath = fontPath
+            fileFontName = fontPath.isEmpty
+                ? nil
+                : SubtitleOverlayView.registerFontFile(fontPath)
+        }
         // `outline` is the legacy boolean; `edge` wins when supplied.
         self.edgeStyle = edge.isEmpty ? (outline ? "outline" : "none") : edge
         self.textColor = UIColor(argb: color)
@@ -119,7 +134,30 @@ private final class SubtitleOverlayView: UIView {
         setNeedsLayout()
     }
 
+    /// Registers a font file with CoreText for this process and returns its
+    /// PostScript name. Registration is idempotent — a duplicate returns false
+    /// but the descriptors are still created, which is what we need. Never
+    /// fatal: a missing/corrupt file just falls back to the built-in map.
+    private static func registerFontFile(_ path: String) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let url = URL(fileURLWithPath: path)
+        var error: Unmanaged<CFError>?
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+        guard
+            let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL)
+                as? [CTFontDescriptor],
+            let descriptor = descriptors.first,
+            let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute)
+                as? String,
+            !name.isEmpty
+        else { return nil }
+        return name
+    }
+
     private func styledFont(_ name: String, size: CGFloat) -> UIFont {
+        if let fileFontName, let custom = UIFont(name: fileFontName, size: size) {
+            return custom
+        }
         switch name {
         case "sans":
             return UIFont(name: "HelveticaNeue", size: size)
@@ -789,6 +827,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                     let vPos = (args?["vPos"] as? NSNumber)?.intValue ?? 20
                     let bgOpacity = (args?["bgOpacity"] as? NSNumber)?.intValue ?? 128
                     let font = (args?["font"] as? String) ?? "system"
+                    let fontPath = (args?["fontPath"] as? String) ?? ""
                     let edge = (args?["edge"] as? String) ?? "outline"
                     self.subtitleDelaySeconds =
                         ((args?["delayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000.0
@@ -800,7 +839,8 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                         verticalPosition: vPos,
                         bgOpacity: bgOpacity,
                         font: font,
-                        edge: edge)
+                        edge: edge,
+                        fontPath: fontPath)
                     result(nil)
                 case "setResizeMode":
                     let mode = (args?["mode"] as? NSNumber)?.intValue ?? 0

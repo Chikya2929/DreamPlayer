@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dream_player/screens/subtitle_settings_screen.dart';
 import 'package:dream_player/services/subtitle_style.dart';
 import 'package:flutter/material.dart';
@@ -88,6 +90,41 @@ void main() {
       expect(loaded.edge, SubtitleEdge.outline);
     });
 
+    test('a Google family persists alongside the built-in fallback', () {
+      const style = SubtitleStyle(
+        font: SubtitleFont.serif,
+        googleFont: 'Poppins',
+      );
+      final back = SubtitleStyle.fromJson(jsonDecode(jsonEncode(style.toJson())));
+      expect(back.googleFont, 'Poppins');
+      // The enum is still stored so clearing the Google choice restores it.
+      expect(back.font, SubtitleFont.serif);
+      expect(back.fontLabel, 'Poppins');
+
+      final cleared = back.copyWith(clearGoogleFont: true);
+      expect(cleared.googleFont, isNull);
+      expect(cleared.fontLabel, 'Serif');
+    });
+
+    test('a style without a Google family decodes to null', () {
+      final back = SubtitleStyle.fromJson(
+        jsonDecode(jsonEncode(const SubtitleStyle().toJson()))
+            as Map<String, dynamic>,
+      );
+      expect(back.googleFont, isNull);
+      expect(back.fontLabel, 'Default');
+    });
+
+    test('channel args carry the resolved font file', () {
+      const style = SubtitleStyle(googleFont: 'Poppins');
+      final args = style.toChannelArgs(fontPath: '/tmp/fonts/Poppins.ttf');
+      expect(args['googleFont'], 'Poppins');
+      expect(args['fontPath'], '/tmp/fonts/Poppins.ttf');
+      expect(args['font'], 'system');
+      // No path (system font, or resolution failed) must be explicit.
+      expect(style.toChannelArgs()['fontPath'], isNull);
+    });
+
     test('channel args carry every field natively typed', () {
       const style = SubtitleStyle(
         sizeMultiplier: 1.5,
@@ -152,9 +189,12 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SubtitleSettingsScreen()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<SubtitleFont>));
+      // The font row opens the picker sheet (built-ins, offline families,
+      // Google Fonts) rather than a dropdown.
+      await tester.tap(find.text('Built-in'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Serif').last);
+      expect(find.text('Subtitle font'), findsOneWidget);
+      await tester.tap(find.text('Serif'));
       await tester.pumpAndSettle();
       expect((await SubtitleStyle.load()).font, SubtitleFont.serif);
 

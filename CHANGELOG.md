@@ -15,6 +15,13 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   so setting changes are visible before leaving the screen. Android maps the
   options to Media3's `CaptionStyleCompat`, iOS to an attributed cue label, and
   MPV to its subtitle properties. Existing saved settings are migrated.
+- **Caption fonts: Google Fonts, and they now apply on iPad.** The font picker
+  offers nine families bundled with the app (so they work offline) plus the
+  full Google Fonts catalog, with every choice previewed in its own typeface.
+  A chosen family is applied by the player itself, not only by the preview.
+  The iPad preview previously ignored the font choice because it asked for
+  generic web font names that iOS does not have; it now uses the same system
+  families playback does.
 - **In-app update prompt.** On Android the app now checks the GitHub release
   feed at most once a day when it opens, and offers the newer build directly:
   release notes, a download with progress, and the system installer. It picks

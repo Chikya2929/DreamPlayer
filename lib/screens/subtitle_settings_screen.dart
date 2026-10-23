@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
 
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import '../services/subtitle_fonts.dart';
 import '../services/subtitle_style.dart';
 import '../utils/subtitle_text_style.dart';
 
@@ -54,6 +58,24 @@ class _SubtitleSettingsScreenState extends State<SubtitleSettingsScreen> {
     await style.save();
   }
 
+  Future<void> _openFontPicker() async {
+    final picked = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _SubtitleFontSheet(
+        selectedFont: _style.font,
+        selectedGoogle: _style.googleFont,
+      ),
+    );
+    if (picked == null) return;
+    if (picked is SubtitleFont) {
+      await _update(_style.copyWith(font: picked, clearGoogleFont: true));
+    } else if (picked is String && picked.isNotEmpty) {
+      await _update(_style.copyWith(googleFont: picked));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -76,11 +98,27 @@ class _SubtitleSettingsScreenState extends State<SubtitleSettingsScreen> {
               children: [
                 _preview(theme),
                 _section(theme, 'Font'),
-                _dropdown<SubtitleFont>(
-                  value: _style.font,
-                  values: SubtitleFont.values,
-                  label: (f) => f.label,
-                  onChanged: (font) => _update(_style.copyWith(font: font)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: theme.dividerColor),
+                    ),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                    title: Text(
+                      _style.fontLabel,
+                      style: subtitleFontPreview(_style),
+                    ),
+                    subtitle: Text(
+                      _style.googleFont == null
+                          ? 'Built-in'
+                          : 'Google Fonts',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _openFontPicker,
+                  ),
                 ),
                 _section(theme, 'Text size'),
                 _slider(
@@ -415,4 +453,180 @@ class _SubtitleSettingsScreenState extends State<SubtitleSettingsScreen> {
           ),
         ),
       );
+}
+
+
+/// Font picker for captions: the six built-ins, the families shipped in the
+/// app (usable offline), then the full Google Fonts catalog. Every row renders
+/// in its own typeface, which is what makes the choice meaningful — the same
+/// trick the app-wide font picker uses.
+class _SubtitleFontSheet extends StatefulWidget {
+  const _SubtitleFontSheet({
+    required this.selectedFont,
+    required this.selectedGoogle,
+  });
+
+  final SubtitleFont selectedFont;
+  final String? selectedGoogle;
+
+  @override
+  State<_SubtitleFontSheet> createState() => _SubtitleFontSheetState();
+}
+
+class _SubtitleFontSheetState extends State<_SubtitleFontSheet> {
+  static bool get _isTest => Platform.environment.containsKey('FLUTTER_TEST');
+
+  String _query = '';
+
+  static final List<String> _online = SubtitleFonts.onlineFamilies
+      .where((f) => !SubtitleFonts.bundled.containsKey(f))
+      .toList(growable: false);
+
+  TextStyle _googlePreview(String family) {
+    final base = Theme.of(context).textTheme.titleMedium ??
+        const TextStyle(fontSize: 16);
+    if (_isTest) return base.copyWith(fontFamily: family);
+    try {
+      return GoogleFonts.getFont(
+        family,
+        fontSize: base.fontSize,
+        fontWeight: FontWeight.w400,
+        color: base.color,
+      );
+    } catch (_) {
+      return base;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final q = _query.trim().toLowerCase();
+
+    final entries = <_FontEntry>[];
+    if (q.isEmpty) {
+      entries.add(const _FontEntry.header('Built-in'));
+      for (final f in SubtitleFont.values) {
+        entries.add(_FontEntry.system(f));
+      }
+      entries.add(const _FontEntry.header('Available offline'));
+      for (final name in SubtitleFonts.bundledNames) {
+        entries.add(_FontEntry.google(name));
+      }
+      entries.add(const _FontEntry.header('Google Fonts'));
+      for (final name in _online) {
+        entries.add(_FontEntry.google(name));
+      }
+    } else {
+      for (final f in SubtitleFont.values) {
+        if (f.label.toLowerCase().contains(q)) entries.add(_FontEntry.system(f));
+      }
+      for (final name in SubtitleFonts.onlineFamilies) {
+        if (name.toLowerCase().contains(q)) entries.add(_FontEntry.google(name));
+      }
+    }
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.9,
+      maxChildSize: 0.95,
+      builder: (context, scrollController) => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Text('Subtitle font', style: theme.textTheme.titleMedium),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search fonts',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          Expanded(
+            child: entries.isEmpty
+                ? const Center(child: Text('No font matches that name'))
+                : ListView.builder(
+                    controller: scrollController,
+                    itemCount: entries.length,
+                    itemBuilder: (context, i) {
+                      final entry = entries[i];
+                      if (entry.header != null) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
+                          child: Text(
+                            entry.header!,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        );
+                      }
+                      final system = entry.font;
+                      final google = entry.google;
+                      final selected = google != null
+                          ? widget.selectedGoogle == google
+                          : widget.selectedGoogle == null &&
+                              widget.selectedFont == system;
+                      final label = google ?? system!.label;
+                      final style = google != null
+                          ? _googlePreview(google)
+                          : TextStyle(
+                              fontFamily: subtitleFontFamily(system!),
+                              fontSize: 18,
+                            );
+                      return ListTile(
+                        title: Text(label, style: style),
+                        trailing: selected
+                            ? Icon(
+                                Icons.check,
+                                size: 20,
+                                color: theme.colorScheme.primary,
+                              )
+                            : null,
+                        onTap: () => Navigator.of(context).pop(
+                          google ?? system,
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One row in the subtitle font sheet: a section header, a built-in family, or
+/// a Google Fonts family.
+class _FontEntry {
+  const _FontEntry.header(this.header)
+      : font = null,
+        google = null;
+  _FontEntry.system(SubtitleFont this.font)
+      : header = null,
+        google = null;
+  _FontEntry.google(String this.google)
+      : header = null,
+        font = null;
+
+  final String? header;
+  final SubtitleFont? font;
+  final String? google;
 }

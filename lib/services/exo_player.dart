@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/video_item.dart';
+import 'subtitle_fonts.dart';
 import 'subtitle_style.dart';
 
 const String exoPlayerViewType = 'dreamplayer/exo_player';
@@ -663,8 +664,12 @@ class ExoPlayerController implements PlaybackController {
       _send('setSubtitleTrack', {'index': index});
 
   @override
-  Future<void> setSubtitleStyle(SubtitleStyle style) =>
-      _send('setSubtitleStyle', style.toChannelArgs());
+  Future<void> setSubtitleStyle(SubtitleStyle style) async {
+    // Media3 and AVFoundation cannot look a Google Fonts family up by name, so
+    // the family is resolved to a TTF path first (bundled assets work offline).
+    final fontPath = await SubtitleFonts.resolvePath(style.googleFont);
+    await _send('setSubtitleStyle', style.toChannelArgs(fontPath: fontPath));
+  }
 
   /// Sets how the video fills the view (fit/crop/stretch/fixed ratio).
   @override

@@ -52,6 +52,7 @@ class SubtitleStyle {
   const SubtitleStyle({
     this.sizeMultiplier = 1.0,
     this.font = SubtitleFont.system,
+    this.googleFont,
     this.colorValue = 0xFFFFFFFF,
     this.textOpacity = 255,
     this.backgroundColorValue = 0x80000000,
@@ -64,8 +65,13 @@ class SubtitleStyle {
   /// Multiplier around Media3's default fractional text size (1.0 = default).
   final double sizeMultiplier;
 
-  /// Caption font family.
+  /// Caption font family for the six built-in choices.
   final SubtitleFont font;
+
+  /// A Google Fonts family name (e.g. `Poppins`) that overrides [font] when
+  /// set. The nine bundled families work offline; any other family is fetched
+  /// on demand and cached by `google_fonts`.
+  final String? googleFont;
 
   /// Text color (RGB; opacity lives in [textOpacity]).
   final int colorValue;
@@ -118,12 +124,17 @@ class SubtitleStyle {
 
   bool get hasBackground => backgroundColorValue >> 24 != 0;
 
+  /// What the settings row shows for the current font choice.
+  String get fontLabel => googleFont ?? font.label;
+
   /// Retained for callers that only need "is any edge drawn".
   bool get outline => edge != SubtitleEdge.none;
 
   SubtitleStyle copyWith({
     double? sizeMultiplier,
     SubtitleFont? font,
+    String? googleFont,
+    bool clearGoogleFont = false,
     int? colorValue,
     int? textOpacity,
     int? backgroundColorValue,
@@ -135,6 +146,7 @@ class SubtitleStyle {
       SubtitleStyle(
         sizeMultiplier: sizeMultiplier ?? this.sizeMultiplier,
         font: font ?? this.font,
+        googleFont: clearGoogleFont ? null : (googleFont ?? this.googleFont),
         colorValue: colorValue ?? this.colorValue,
         textOpacity: textOpacity ?? this.textOpacity,
         backgroundColorValue:
@@ -148,6 +160,7 @@ class SubtitleStyle {
   Map<String, dynamic> toJson() => {
         'size': sizeMultiplier,
         'font': font.wire,
+        if (googleFont != null) 'googleFont': googleFont,
         'color': colorValue,
         'textOpacity': textOpacity,
         'bg': backgroundColorValue,
@@ -164,6 +177,10 @@ class SubtitleStyle {
             (json['size'] is num ? (json['size'] as num).toDouble() : null) ??
                 1.0,
         font: SubtitleFont.fromWire(json['font']),
+        googleFont: json['googleFont'] is String &&
+                (json['googleFont'] as String).isNotEmpty
+            ? json['googleFont'] as String
+            : null,
         colorValue: json['color'] is int ? json['color'] as int : 0xFFFFFFFF,
         textOpacity:
             json['textOpacity'] is int ? json['textOpacity'] as int : 255,
@@ -198,10 +215,14 @@ class SubtitleStyle {
     }
   }
 
-  /// The channel payload both native handlers accept.
-  Map<String, dynamic> toChannelArgs() => {
+  /// The channel payload both native handlers accept. [fontPath] is an
+  /// absolute path to a TTF that the native renderer registers; it is resolved
+  /// by `SubtitleFonts` at the call site because it needs filesystem access.
+  Map<String, dynamic> toChannelArgs({String? fontPath}) => {
         'size': sizeMultiplier,
         'font': font.wire,
+        'googleFont': googleFont,
+        'fontPath': fontPath,
         'color': effectiveTextColor,
         'bg': backgroundColorValue,
         'bgOpacity': backgroundOpacity,
