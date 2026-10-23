@@ -70,38 +70,123 @@ private final class SubtitleOverlayView: UIView {
     // MARK: - User subtitle appearance
 
     private var verticalPosition: Int = 20
+    private var styleSize: Double = 1.0
+    private var textColor: UIColor = .white
+    private var boxColor: UIColor = .clear
+    private var edgeStyle: String = "outline"
+    private var fontStyle: String = "system"
 
     /// Applies the user's subtitle appearance from Dart (`setSubtitleStyle`).
     /// - `size` multiplies the base glyph size.
-    /// - `color` is the text ARGB; `bg` an ARGB cue-box (alpha 0 = none).
-    /// - `outline` toggles the black shadow behind glyphs.
-    /// - `verticalPosition` 0–255 (0 = top, 255 = bottom, default 20 = near bottom).
-    func applyStyle(size: Double, color: Int, bg: Int, outline: Bool, verticalPosition: Int = 20) {
+    /// - `color` is the text ARGB (text opacity already folded in by Dart).
+    /// - `bg` is the cue-box RGB; alpha 0 means "no box".
+    /// - `bgOpacity` overrides the box alpha (0–255).
+    /// - `font` is one of system/sans/serif/mono/casual/cursive.
+    /// - `edge` is none/outline/shadow/raised/depressed.
+    /// - `verticalPosition` 0–255 (0 = bottom, 255 = top, default 20).
+    func applyStyle(
+        size: Double,
+        color: Int,
+        bg: Int,
+        outline: Bool,
+        verticalPosition: Int = 20,
+        bgOpacity: Int = 128,
+        font: String = "system",
+        edge: String = "outline"
+    ) {
         self.verticalPosition = verticalPosition
-        let base = CGFloat(17 * size.clamped(0.6...2.0))
-        label.font = .systemFont(ofSize: base, weight: .semibold)
-        label.textColor = UIColor(argb: color)
+        self.styleSize = size
+        self.fontStyle = font
+        // `outline` is the legacy boolean; `edge` wins when supplied.
+        self.edgeStyle = edge.isEmpty ? (outline ? "outline" : "none") : edge
+        self.textColor = UIColor(argb: color)
         if (bg >> 24) != 0 {
-            label.backgroundColor = UIColor(argb: bg)
-            // UIKit auto-sets UILabel.opaque = true when backgroundColor is
-            // assigned, which forces the background to render opaque and
-            // silently ignores the alpha byte. Turn it off so the partial
-            // alpha from the ARGB value actually blends with the video.
-            label.isOpaque = false
-            label.layer.cornerRadius = 4
-            label.clipsToBounds = true
+            let alpha = UInt32(max(0, min(255, bgOpacity)))
+            self.boxColor = UIColor(
+                argb: (bg & 0x00FFFFFF) | Int(alpha << 24)
+            )
         } else {
-            label.backgroundColor = .clear
-            label.layer.cornerRadius = 0
-            label.clipsToBounds = false
+            self.boxColor = .clear
         }
-        if outline {
-            label.shadowColor = .black
-            label.shadowOffset = CGSize(width: 1, height: 1)
-        } else {
-            label.shadowColor = nil
-        }
+        // Cue boxes are drawn by the attributed string (one box per line, like
+        // YouTube) rather than the label background, so clear the label's own.
+        label.backgroundColor = .clear
+        label.isOpaque = false
+        label.layer.cornerRadius = 0
+        label.clipsToBounds = false
+        // Re-render the cue currently on screen with the new style.
+        renderActiveText()
         setNeedsLayout()
+    }
+
+    private func styledFont(_ name: String, size: CGFloat) -> UIFont {
+        switch name {
+        case "sans":
+            return UIFont(name: "HelveticaNeue", size: size)
+                ?? .systemFont(ofSize: size, weight: .semibold)
+        case "serif":
+            return UIFont(name: "Georgia", size: size)
+                ?? .systemFont(ofSize: size, weight: .semibold)
+        case "mono":
+            return UIFont(name: "Menlo", size: size)
+                ?? .systemFont(ofSize: size, weight: .semibold)
+        case "casual":
+            return UIFont(name: "MarkerFelt-Wide", size: size)
+                ?? .systemFont(ofSize: size, weight: .semibold)
+        case "cursive":
+            return UIFont(name: "SnellRoundhand", size: size)
+                ?? .systemFont(ofSize: size, weight: .semibold)
+        default:
+            return .systemFont(ofSize: size, weight: .semibold)
+        }
+    }
+
+    /// Builds the attributed cue text — the iOS equivalent of what Media3's
+    /// `CaptionStyleCompat` does (font, colors, and a real glyph stroke).
+    private func styledText(_ text: String) -> NSAttributedString {
+        let base = CGFloat(17 * styleSize.clamped(0.6...2.0))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: styledFont(fontStyle, size: base),
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph,
+        ]
+        if boxColor.cgColor.alpha > 0 {
+            attributes[.backgroundColor] = boxColor
+        }
+        switch edgeStyle {
+        case "none":
+            break
+        case "shadow":
+            let shadow = NSShadow()
+            shadow.shadowColor = UIColor.black.withAlphaComponent(0.85)
+            shadow.shadowOffset = CGSize(width: 2, height: 2)
+            shadow.shadowBlurRadius = 2
+            attributes[.shadow] = shadow
+        case "raised":
+            let shadow = NSShadow()
+            shadow.shadowColor = UIColor.black.withAlphaComponent(0.85)
+            shadow.shadowOffset = CGSize(width: -1, height: -1)
+            shadow.shadowBlurRadius = 1
+            attributes[.shadow] = shadow
+        case "depressed":
+            let shadow = NSShadow()
+            shadow.shadowColor = UIColor.black.withAlphaComponent(0.85)
+            shadow.shadowOffset = CGSize(width: 1, height: 1)
+            shadow.shadowBlurRadius = 1
+            attributes[.shadow] = shadow
+        default: // "outline"
+            attributes[.strokeColor] = UIColor.black
+            attributes[.strokeWidth] = -3.0
+        }
+        return NSAttributedString(string: text, attributes: attributes)
+    }
+
+    private func renderActiveText() {
+        guard let text = activeText else { return }
+        label.attributedText = styledText(text)
     }
 
     override func layoutSubviews() {
@@ -112,7 +197,11 @@ private final class SubtitleOverlayView: UIView {
     func show(text: String) {
         activeText = text.isEmpty ? nil : text
         activeImage = nil
-        label.text = text
+        if let activeText {
+            label.attributedText = styledText(activeText)
+        } else {
+            label.attributedText = nil
+        }
         imageView.isHidden = true
         setNeedsLayout()
     }
@@ -698,10 +787,20 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                     let bg = (args?["bg"] as? NSNumber)?.intValue ?? 0x80000000
                     let outline = (args?["outline"] as? Bool) ?? true
                     let vPos = (args?["vPos"] as? NSNumber)?.intValue ?? 20
+                    let bgOpacity = (args?["bgOpacity"] as? NSNumber)?.intValue ?? 128
+                    let font = (args?["font"] as? String) ?? "system"
+                    let edge = (args?["edge"] as? String) ?? "outline"
                     self.subtitleDelaySeconds =
                         ((args?["delayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000.0
                     self.subtitleOverlay.applyStyle(
-                        size: size, color: color, bg: bg, outline: outline, verticalPosition: vPos)
+                        size: size,
+                        color: color,
+                        bg: bg,
+                        outline: outline,
+                        verticalPosition: vPos,
+                        bgOpacity: bgOpacity,
+                        font: font,
+                        edge: edge)
                     result(nil)
                 case "setResizeMode":
                     let mode = (args?["mode"] as? NSNumber)?.intValue ?? 0

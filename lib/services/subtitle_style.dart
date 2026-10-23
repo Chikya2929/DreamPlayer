@@ -3,6 +3,47 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Caption font families offered in Settings. [wire] is the string sent to the
+/// native renderers; [label] is what the user sees.
+enum SubtitleFont {
+  system('system', 'Default'),
+  sansSerif('sans', 'Sans serif'),
+  serif('serif', 'Serif'),
+  monospace('mono', 'Monospace'),
+  casual('casual', 'Casual'),
+  cursive('cursive', 'Cursive');
+
+  const SubtitleFont(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static SubtitleFont fromWire(Object? value) => values.firstWhere(
+        (f) => f.wire == value,
+        orElse: () => SubtitleFont.system,
+      );
+}
+
+/// Edge treatment behind the glyphs — the same five options YouTube's caption
+/// dialog offers. Values map 1:1 to Media3's `CaptionStyleCompat.EDGE_TYPE_*`.
+enum SubtitleEdge {
+  none('none', 'None'),
+  outline('outline', 'Outline'),
+  dropShadow('shadow', 'Drop shadow'),
+  raised('raised', 'Raised'),
+  depressed('depressed', 'Depressed');
+
+  const SubtitleEdge(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static SubtitleEdge fromWire(Object? value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => SubtitleEdge.outline,
+      );
+}
+
 /// User-configurable subtitle appearance, applied natively on both platforms
 /// (Media3 `SubtitleView` on Android, the host `SubtitleOverlayView` on
 /// iOS) and persisted in shared_preferences as JSON.
@@ -10,10 +51,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SubtitleStyle {
   const SubtitleStyle({
     this.sizeMultiplier = 1.0,
+    this.font = SubtitleFont.system,
     this.colorValue = 0xFFFFFFFF,
+    this.textOpacity = 255,
     this.backgroundColorValue = 0x80000000,
     this.backgroundOpacity = 128,
-    this.outline = true,
+    this.edge = SubtitleEdge.outline,
     this.delayMs = 0,
     this.verticalPosition = 20,
   });
@@ -21,17 +64,23 @@ class SubtitleStyle {
   /// Multiplier around Media3's default fractional text size (1.0 = default).
   final double sizeMultiplier;
 
-  /// Text color (ARGB).
+  /// Caption font family.
+  final SubtitleFont font;
+
+  /// Text color (RGB; opacity lives in [textOpacity]).
   final int colorValue;
+
+  /// Text opacity (0-255).
+  final int textOpacity;
 
   /// Per-cue background box (ARGB). An alpha of 0 means "no box".
   final int backgroundColorValue;
 
-  /// Background opacity (0-255). Only used when backgroundColorValue alpha > 0.
+  /// Background opacity (0-255). Only used when [hasBackground].
   final int backgroundOpacity;
 
-  /// Black outline/shadow behind the glyphs for readability.
-  final bool outline;
+  /// Edge treatment behind the glyphs.
+  final SubtitleEdge edge;
 
   /// Playback-time shift for subtitle cues (-30 s … +30 s). Positive values
   /// show each cue LATER than authored.
@@ -48,40 +97,64 @@ class SubtitleStyle {
   static const maxVerticalPosition = 255;
   static const minBackgroundOpacity = 0;
   static const maxBackgroundOpacity = 255;
+  static const minTextOpacity = 0;
+  static const maxTextOpacity = 255;
 
   double get delaySeconds => delayMs / 1000.0;
 
   Color get color => Color(colorValue);
   Color get backgroundColor => Color(backgroundColorValue);
 
+  /// Text color with [textOpacity] applied — what the renderers actually draw.
+  int get effectiveTextColor =>
+      (colorValue & 0x00FFFFFF) | ((textOpacity & 0xFF) << 24);
+
+  /// Background color with [backgroundOpacity] applied.
+  int get effectiveBackgroundColor =>
+      (backgroundColorValue & 0x00FFFFFF) | ((backgroundOpacity & 0xFF) << 24);
+
+  Color get effectiveTextColorValue => Color(effectiveTextColor);
+  Color get effectiveBackgroundColorValue => Color(effectiveBackgroundColor);
+
   bool get hasBackground => backgroundColorValue >> 24 != 0;
+
+  /// Retained for callers that only need "is any edge drawn".
+  bool get outline => edge != SubtitleEdge.none;
 
   SubtitleStyle copyWith({
     double? sizeMultiplier,
+    SubtitleFont? font,
     int? colorValue,
+    int? textOpacity,
     int? backgroundColorValue,
     int? backgroundOpacity,
-    bool? outline,
+    SubtitleEdge? edge,
     int? delayMs,
     int? verticalPosition,
   }) =>
       SubtitleStyle(
         sizeMultiplier: sizeMultiplier ?? this.sizeMultiplier,
+        font: font ?? this.font,
         colorValue: colorValue ?? this.colorValue,
+        textOpacity: textOpacity ?? this.textOpacity,
         backgroundColorValue:
             backgroundColorValue ?? this.backgroundColorValue,
         backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
-        outline: outline ?? this.outline,
+        edge: edge ?? this.edge,
         delayMs: delayMs ?? this.delayMs,
         verticalPosition: verticalPosition ?? this.verticalPosition,
       );
 
   Map<String, dynamic> toJson() => {
         'size': sizeMultiplier,
+        'font': font.wire,
         'color': colorValue,
+        'textOpacity': textOpacity,
         'bg': backgroundColorValue,
         'bgOpacity': backgroundOpacity,
+        // Written for older builds that only understood a boolean.
         'outline': outline,
+        'edge': edge.wire,
         'delayMs': delayMs,
         'vPos': verticalPosition,
       };
@@ -90,12 +163,20 @@ class SubtitleStyle {
         sizeMultiplier:
             (json['size'] is num ? (json['size'] as num).toDouble() : null) ??
                 1.0,
+        font: SubtitleFont.fromWire(json['font']),
         colorValue: json['color'] is int ? json['color'] as int : 0xFFFFFFFF,
+        textOpacity:
+            json['textOpacity'] is int ? json['textOpacity'] as int : 255,
         backgroundColorValue:
             json['bg'] is int ? json['bg'] as int : 0x80000000,
         backgroundOpacity:
             json['bgOpacity'] is int ? json['bgOpacity'] as int : 128,
-        outline: json['outline'] is bool ? json['outline'] as bool : true,
+        // Legacy JSON only carried `outline`; keep those users' choice.
+        edge: json.containsKey('edge')
+            ? SubtitleEdge.fromWire(json['edge'])
+            : (json['outline'] is bool && json['outline'] == false
+                ? SubtitleEdge.none
+                : SubtitleEdge.outline),
         delayMs: json['delayMs'] is int ? json['delayMs'] as int : 0,
         verticalPosition:
             json['vPos'] is int ? json['vPos'] as int : 20,
@@ -120,10 +201,11 @@ class SubtitleStyle {
   /// The channel payload both native handlers accept.
   Map<String, dynamic> toChannelArgs() => {
         'size': sizeMultiplier,
-        'color': colorValue,
+        'font': font.wire,
+        'color': effectiveTextColor,
         'bg': backgroundColorValue,
         'bgOpacity': backgroundOpacity,
-        'outline': outline,
+        'edge': edge.wire,
         'delayMs': delayMs,
         'vPos': verticalPosition,
       };

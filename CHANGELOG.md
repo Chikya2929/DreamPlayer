@@ -7,6 +7,14 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **YouTube-style caption appearance.** Subtitle settings now cover font
+  family (default, sans serif, serif, monospace, casual, cursive), size, text
+  color and opacity, background color and opacity, and five edge styles (none,
+  outline, drop shadow, raised, depressed) — plus the existing position and
+  sync delay. The live preview uses the same style builder as the MPV overlay,
+  so setting changes are visible before leaving the screen. Android maps the
+  options to Media3's `CaptionStyleCompat`, iOS to an attributed cue label, and
+  MPV to its subtitle properties. Existing saved settings are migrated.
 - **In-app update prompt.** On Android the app now checks the GitHub release
   feed at most once a day when it opens, and offers the newer build directly:
   release notes, a download with progress, and the system installer. It picks

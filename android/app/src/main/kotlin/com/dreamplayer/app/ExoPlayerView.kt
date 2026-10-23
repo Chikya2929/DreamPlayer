@@ -10,6 +10,7 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.graphics.Color
+import android.graphics.Typeface
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
@@ -1644,7 +1645,8 @@ class ExoPlayerView(
                         (call.argument<Number>("size")?.toDouble()) ?: 1.0,
                         call.argument<Number>("color")?.toInt() ?: 0xFFFFFFFF.toInt(),
                         call.argument<Number>("bg")?.toInt() ?: 0x80000000.toInt(),
-                        call.argument<Boolean>("outline") ?: true,
+                        call.argument<String>("edge") ?: "outline",
+                        call.argument<String>("font") ?: "system",
                         (call.argument<Number>("delayMs")?.toLong()) ?: 0L,
                         (call.argument<Number>("vPos")?.toInt()) ?: 20,
                         (call.argument<Number>("bgOpacity")?.toInt()) ?: 128,
@@ -2292,7 +2294,8 @@ class ExoPlayerView(
         sizeMult: Double,
         color: Int,
         bg: Int,
-        outline: Boolean,
+        edge: String,
+        font: String = "system",
         delayMs: Long = 0L,
         vPos: Int = 20,
         bgOpacity: Int = 128,
@@ -2311,23 +2314,36 @@ class ExoPlayerView(
         view.setBottomPaddingFraction((vPos.coerceIn(0, 255) / 255.0f))
 
         val hasBg = (bg ushr 24) != 0
-        val edgeType = if (outline)
-            CaptionStyleCompat.EDGE_TYPE_OUTLINE
-        else
-            CaptionStyleCompat.EDGE_TYPE_NONE
+        // The five YouTube-style edge options map 1:1 onto Media3's constants.
+        val edgeType = when (edge) {
+            "outline" -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+            "shadow" -> CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+            "raised" -> CaptionStyleCompat.EDGE_TYPE_RAISED
+            "depressed" -> CaptionStyleCompat.EDGE_TYPE_DEPRESSED
+            else -> CaptionStyleCompat.EDGE_TYPE_NONE
+        }
         // Override the alpha channel of `bg` with the user-controlled opacity.
         val effectiveBg = if (hasBg) {
             (bg and 0x00FFFFFF) or ((bgOpacity.coerceIn(0, 255) shl 24) and 0xFF000000.toInt())
         } else {
             Color.TRANSPARENT
         }
+        // Caption font family. `null` keeps Media3's default typeface.
+        val typeface = when (font) {
+            "sans" -> Typeface.create("sans-serif", Typeface.NORMAL)
+            "serif" -> Typeface.create("serif", Typeface.NORMAL)
+            "mono" -> Typeface.create("monospace", Typeface.NORMAL)
+            "casual" -> Typeface.create("casual", Typeface.NORMAL)
+            "cursive" -> Typeface.create("cursive", Typeface.NORMAL)
+            else -> null
+        }
         val style = CaptionStyleCompat(
             color,
             if (hasBg) effectiveBg else Color.TRANSPARENT,
             Color.TRANSPARENT,
             edgeType,
-            if (outline) Color.BLACK else Color.TRANSPARENT,
-            null,
+            if (edgeType == CaptionStyleCompat.EDGE_TYPE_NONE) Color.TRANSPARENT else Color.BLACK,
+            typeface,
         )
         view.setStyle(style)
 

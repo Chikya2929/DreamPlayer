@@ -44,6 +44,7 @@ import '../utils/episode_label.dart';
 import '../utils/screen_orientation.dart';
 import '../utils/mpv_audio_select.dart';
 import '../utils/mpv_volume.dart';
+import '../utils/subtitle_text_style.dart';
 import 'download_screen.dart';
 import '../services/subtitle_languages.dart';
 import '../services/subtitle_prefs.dart';
@@ -1705,29 +1706,58 @@ Future<void> _offerVc1Mpv() async {
         final a = ((argb >> 24) & 0xFF).toRadixString(16).padLeft(2, '0');
         return '#$a$r$g$b';
       }
-      // Subtitle text color.
-      await platform.setProperty('sub-color', colorToHex(s.colorValue));
+      // Subtitle text color (text opacity is folded into the alpha).
+      await platform.setProperty(
+          'sub-color', colorToHex(s.effectiveTextColor));
       // Background box behind subtitles.
       if (s.hasBackground) {
-        // Combine the background color's RGB with the user's opacity slider.
-        final bgArgb = (s.backgroundOpacity << 24) |
-            (s.backgroundColorValue & 0x00FFFFFF);
-        await platform.setProperty('sub-back-color', colorToHex(bgArgb));
+        await platform.setProperty(
+            'sub-back-color', colorToHex(s.effectiveBackgroundColor));
       } else {
         await platform.setProperty('sub-back-color', '#00000000');
       }
-      // Outline/shadow for readability.
-      await platform.setProperty('sub-outline-size', s.outline ? '1.15' : '0');
+      // Font family. mpv resolves these names through its font provider and
+      // falls back to its default when a family is missing.
+      final mpvFont = switch (s.font) {
+        SubtitleFont.serif => 'serif',
+        SubtitleFont.monospace => 'monospace',
+        SubtitleFont.system ||
+        SubtitleFont.sansSerif ||
+        SubtitleFont.casual ||
+        SubtitleFont.cursive =>
+          'sans-serif',
+      };
+      await platform.setProperty('sub-font', mpvFont);
+      // Edge treatment. mpv has no bevel, so raised/depressed become a
+      // one-pixel offset shadow in the matching direction.
+      switch (s.edge) {
+        case SubtitleEdge.none:
+          await platform.setProperty('sub-outline-size', '0');
+          await platform.setProperty('sub-shadow-offset', '0');
+        case SubtitleEdge.outline:
+          await platform.setProperty('sub-outline-size', '1.15');
+          await platform.setProperty('sub-shadow-offset', '0');
+        case SubtitleEdge.dropShadow:
+          await platform.setProperty('sub-outline-size', '0');
+          await platform.setProperty('sub-shadow-offset', '2');
+        case SubtitleEdge.raised:
+          await platform.setProperty('sub-outline-size', '0');
+          await platform.setProperty('sub-shadow-offset', '-1');
+        case SubtitleEdge.depressed:
+          await platform.setProperty('sub-outline-size', '0');
+          await platform.setProperty('sub-shadow-offset', '1');
+      }
       await platform.setProperty('sub-outline-color', '#80000000');
       await platform.setProperty('sub-shadow-color', '#80000000');
-      await platform.setProperty('sub-shadow-offset', '0');
       // Delay: positive = subtitle appears later.
       await platform.setProperty('sub-delay', '${s.delayMs / 1000.0}');
       // Vertical position: our 0-255 maps to mpv's sub-pos (0=top, 100=default bottom, 150=below screen).
       // Map linearly: 0→100 (bottom), 127→50 (center), 255→0 (top).
       final mpvPos = (100 - (s.verticalPosition / 255.0 * 100)).round().clamp(0, 150);
       await platform.setProperty('sub-pos', '$mpvPos');
-      debugPrint('mpv: subtitle style applied (scale=${s.sizeMultiplier}, pos=$mpvPos, outline=${s.outline}, delay=${s.delayMs}ms)');
+      debugPrint('mpv: subtitle style applied (scale=${s.sizeMultiplier}, '
+          'font=${s.font.wire}, edge=${s.edge.wire}, pos=$mpvPos, '
+          'delay=${s.delayMs}ms)');
     } catch (e) {
       debugPrint('mpv: subtitle style apply failed: $e');
     }
@@ -7053,29 +7083,10 @@ if (mounted) setState(_applySwipeValue);
                     child: Text(
                       _mpvSubtitleLines.join('\n'),
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _subtitleStyle.color,
+                      // Same builder as the Settings preview.
+                      style: subtitleTextStyle(
+                        _subtitleStyle,
                         fontSize: fontSize,
-                        height: 1.4,
-                        fontWeight: FontWeight.w500,
-                        // Apply the user-controlled background opacity.
-                        backgroundColor: _subtitleStyle.hasBackground
-                            ? Color(
-                                (_subtitleStyle.backgroundColorValue &
-                                        0x00FFFFFF) |
-                                    ((_subtitleStyle.backgroundOpacity & 0xFF)
-                                        << 24),
-                              )
-                            : null,
-                        shadows: _subtitleStyle.outline
-                            ? [
-                                const Shadow(
-                                  color: Colors.black,
-                                  blurRadius: 4,
-                                  offset: Offset(2, 2),
-                                ),
-                              ]
-                            : null,
                       ),
                     ),
                   ),
