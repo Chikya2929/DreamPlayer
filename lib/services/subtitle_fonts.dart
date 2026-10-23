@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_debug_log.dart';
+
 /// Resolves a Google Fonts family to a **font file** the native subtitle
 /// renderers can register.
 ///
@@ -97,30 +99,42 @@ class SubtitleFonts {
           data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
           flush: true,
         );
+        AppDebugLog.mark('SUBFONT $family -> bundled asset');
         return target.path;
       }
 
       final cached = await _googleFontsCacheFile(family);
       if (cached != null) {
         await cached.copy(target.path);
+        AppDebugLog.mark('SUBFONT $family -> cached file');
         return target.path;
       }
 
       // Previewing the family usually already started this; nudge it and give
       // the download a short window so opening a video right after choosing a
-      // font still uses it.
+      // font still uses it. `pendingFonts()` is the package's own await for
+      // the load it started, so the file is usually there before polling.
       _triggerDownload(family);
+      try {
+        await GoogleFonts.pendingFonts()
+            .timeout(const Duration(seconds: 10));
+      } catch (_) {
+        // Offline / fetch refused: the poll below reports the outcome.
+      }
       final deadline = DateTime.now().add(const Duration(seconds: 8));
       while (DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 250));
         final fetched = await _googleFontsCacheFile(family);
         if (fetched != null) {
           await fetched.copy(target.path);
+          AppDebugLog.mark('SUBFONT $family -> downloaded file');
           return target.path;
         }
+        await Future<void>.delayed(const Duration(milliseconds: 250));
       }
-    } catch (_) {
+      AppDebugLog.mark('SUBFONT $family -> NO FILE (renderer falls back)');
+    } catch (error) {
       // Fall through to "no file": the renderer keeps its default font.
+      AppDebugLog.mark('SUBFONT $family -> resolve failed: $error');
     }
     return null;
   }

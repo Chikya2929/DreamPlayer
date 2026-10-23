@@ -138,20 +138,55 @@ private final class SubtitleOverlayView: UIView {
     /// PostScript name. Registration is idempotent — a duplicate returns false
     /// but the descriptors are still created, which is what we need. Never
     /// fatal: a missing/corrupt file just falls back to the built-in map.
+    ///
+    /// **`UIFont(name:)` needs the PostScript name, not the full name.** These
+    /// TTFs carry `full = "Poppins Regular"` and `postscript =
+    /// "Poppins-Regular"`; asking CoreText for `kCTFontNameAttribute` returns
+    /// the FULL name, `UIFont(name: "Poppins Regular")` is nil, and the
+    /// renderer silently fell back to the system font — so a Google family
+    /// showed in the settings preview (Flutter resolves it itself) but not in
+    /// the video. Try the PostScript name first and only accept a name that
+    /// actually resolves to a font.
     private static func registerFontFile(_ path: String) -> String? {
-        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        guard FileManager.default.fileExists(atPath: path) else {
+            SBMLog.log("subtitle font: file missing \(path)")
+            return nil
+        }
         let url = URL(fileURLWithPath: path)
         var error: Unmanaged<CFError>?
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
         guard
             let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL)
                 as? [CTFontDescriptor],
-            let descriptor = descriptors.first,
-            let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute)
-                as? String,
-            !name.isEmpty
-        else { return nil }
-        return name
+            let descriptor = descriptors.first
+        else {
+            SBMLog.log("subtitle font: no CoreText descriptor for \(url.lastPathComponent)")
+            return nil
+        }
+        var candidates: [String] = []
+        for attribute in [
+            kCTFontPostScriptNameAttribute,
+            kCTFontNameAttribute,
+            kCTFontFamilyNameAttribute,
+        ] {
+            if let name = CTFontDescriptorCopyAttribute(descriptor, attribute) as? String,
+               !name.isEmpty, !candidates.contains(name)
+            {
+                candidates.append(name)
+            }
+        }
+        for name in candidates where UIFont(name: name, size: 12) != nil {
+            SBMLog.log(
+                "subtitle font: \(url.lastPathComponent) -> \(name)"
+                    + " (registered, ignored: \(candidates.filter { $0 != name }))"
+            )
+            return name
+        }
+        SBMLog.log(
+            "subtitle font: \(url.lastPathComponent) registered but no UIFont"
+                + " name resolved (\(candidates))"
+        )
+        return candidates.first
     }
 
     private func styledFont(_ name: String, size: CGFloat) -> UIFont {
