@@ -1057,6 +1057,18 @@ video drew at 2x and covered half the picture. It is now `no`.
 
   **Fonts (2026-10-24).** The font row opens a sheet with the six built-ins, nine families bundled in the app (offline), and the full Google Fonts catalog (searchable, every row previewed in its own typeface). A Google family is stored as `SubtitleStyle.googleFont` (the enum stays as the fallback), so clearing the Google choice restores the built-in. Dart resolves it to a **TTF path** (`lib/services/subtitle_fonts.dart` → `<app support>/subtitle_fonts/<family>.ttf`) because Media3, AVFoundation and libass cannot look a Google name up: bundled assets are copied out of the asset bundle, otherwise `google_fonts`' own download cache is reused, otherwise the download is triggered and awaited briefly. `setSubtitleStyle` passes `fontPath`; Android uses `Typeface.createFromFile`, iOS registers the file with CoreText (`CTFontManagerRegisterFontsForURL` + `kCTFontNameAttribute` → `UIFont(name:)`), MPV gets `sub-fonts-dir` + `sub-font`. A missing/corrupt file falls back to the built-in family map — never break playback for a font.
 
+  **Paywall (#36).** Fonts are part of subtitle styling, so the gate stays on
+  the ONE route into `SubtitleSettingsScreen` (`player_screen.dart` CC sheet →
+  `await _gate()` → push). The picker is private to that screen
+  (`_SubtitleFontSheet`, opened only by `_openFontPicker`), and
+  `test/subtitle_gate_test.dart` pins both facts: one entry point, a
+  short-circuiting gate before the push, `_gate` reading
+  `Entitlements.instance.isEntitled` / `effectivePaywallEnabled`. Do not
+  double-gate the font row itself — the screen-level gate is the shape, and
+  Android answers `advanced = true` inside `checkGate`. Applying a *saved*
+  style is deliberately ungated: a lapsed subscriber must not lose subtitles
+  mid-playback.
+
   **Two traps, both silent:**
   - **iOS preview ignored the font.** `subtitleFontFamily` returned the CSS aliases (`sans-serif`, `casual`, …), which Android resolves and iOS does not, so the preview stayed in the system font while the native overlay (real UIFonts) changed. It now maps to Apple family names on iOS/macOS. Keep those two mappings in step with `SubtitleOverlayView.styledFont`.
   - **Bundled filenames must be `<Family>-Regular.ttf` verbatim, spaces included** (`Playfair Display-Regular.ttf`, `Fira Code-Regular.ttf`). `google_fonts` matches an asset by comparing the filename to `toApiFilenamePrefix()`, which keeps the display name intact; a tidied `FiraCode-Regular.ttf` is silently not recognised and the font downloads over the network instead. `test/subtitle_fonts_test.dart` pins the exact name and that every declared asset loads.
