@@ -1,6 +1,3 @@
-import 'dart:typed_data';
-
-import 'package:dream_player/services/subtitle_fonts.dart';
 import 'package:dream_player/utils/ttf_names.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
