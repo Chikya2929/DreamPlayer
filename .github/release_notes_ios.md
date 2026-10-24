@@ -50,7 +50,9 @@ New:
   file types only the sound can be sent and the picture stays on this device.
 • The Now Playing card on the lock screen and in Control Center now shows the
   matched poster instead of a blank tile, and its skip-back and skip-forward
-  buttons jump ten seconds, stopping cleanly at either end.
+  buttons jump ten seconds, stopping cleanly at either end. The card now also
+  shows the resolved title — with the season and episode (e.g. S02E05 · The
+  Long Way Home) — instead of the raw file name.
 • The 4:3, 16:9, 1.85:1 and 2.39:1 choices in the aspect-ratio menu now give
   the video exactly that frame instead of approximating it on the full screen.
   Fit, Crop and Stretch are unchanged.
@@ -70,6 +72,10 @@ Fixed:
 • A font downloaded from the catalogue could be ignored by the player and the
   subtitles would fall back to the default typeface. Families whose names
   contain a space were the most likely to hit this.
+• Chapter markers on the seekbar and the previous/next chapter buttons now
+  stay visible after changing the audio track.
+• Changing the audio track no longer plays the default track for a moment
+  before switching to the one you chose.
 
 ---
 
