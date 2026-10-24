@@ -1656,12 +1656,103 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
             // `load(startPosition:)` is not honoured for network sources, so a
             // reload from a saved position still comes up at 0. Re-assert it.
             await reassertPosition(position)
+            // Re-probe chapters after reload (audio track change, etc.) so the
+            // chapter markers and prev/next buttons don't disappear.
+            await probeChapters()
             SBMLog.log("reloadSession: done at \(position)s")
         } catch let error as CancellationError {
             // Superseded by a newer load elsewhere — not a playback failure.
             SBMLog.log("reloadSession: cancelled (superseded)")
         } catch {
             lastError = String(describing: error)
+        }
+    }
+
+    /// Probes chapters for the current source (local file, in-app SMB, WebDAV,
+    /// FTP, or plain HTTP). Runs off the main actor because the reads are
+    /// network I/O. Best-effort: nothing here may delay or fail playback.
+    private func probeChapters() async {
+        // Local files (FileHandle-based parsers).
+        if let fileURL = localURL, fileURL.isFileURL {
+            let ext = fileURL.pathExtension.lowercased()
+            if ChapterProbe.mkvExtensions.contains(ext) {
+                let path = fileURL.path
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let maps = MkvChapters.parseMaps(path: path)
+                    if maps.isEmpty { return }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.chapters = maps
+                        self.emit()
+                    }
+                }
+            }
+            if ChapterProbe.mp4Extensions.contains(ext) {
+                let path = fileURL.path
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let maps = Mp4Chapters.parseMaps(path: path)
+                    if maps.isEmpty { return }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.chapters = maps
+                        self.emit()
+                    }
+                }
+            }
+        }
+
+        // Remote sources (in-app SMB / WebDAV / FTP / plain HTTP).
+        // Only if we don't already have a local file URL with chapters.
+        if localURL == nil || !(localURL?.isFileURL ?? false) {
+            let ext = (smbFormatHint ?? localURL?.pathExtension ?? "")
+                .lowercased()
+            let isChapterContainer = ChapterProbe.mkvExtensions.contains(ext)
+                || ChapterProbe.mp4Extensions.contains(ext)
+            SBMLog.log(
+                "chapters: remote gate ext=\(ext) container=\(isChapterContainer) "
+                + "cursor=\(self.chapterCursor != nil) "
+                + "byteSource=\(self.chapterByteSource != nil)"
+            )
+            if isChapterContainer {
+                let cursor = self.chapterCursor
+                let byteSource = self.chapterByteSource
+                let plainHTTP: URL? = {
+                    guard cursor == nil, byteSource == nil,
+                          let u = localURL,
+                          let scheme = u.scheme?.lowercased(),
+                          scheme == "http" || scheme == "https"
+                    else { return nil }
+                    return u
+                }()
+                Task.detached(priority: .utility) { [weak self] in
+                    var maps: [[String: Any]] = []
+                    if let cursor {
+                        maps = ChapterProbe.probe(cursor: cursor, ext: ext)
+                    } else if let byteSource {
+                        maps = await ChapterProbe.probe(
+                            byteSource: byteSource, ext: ext
+                        )
+                    } else if let plainHTTP {
+                        let probeSource = try? WebDAVClient.shared
+                            .makeByteRangeSource(
+                                url: plainHTTP,
+                                headers: [:],
+                                allowSelfSigned: false
+                            )
+                        if let probeSource {
+                            maps = await ChapterProbe.probe(
+                                byteSource: probeSource, ext: ext
+                            )
+                        }
+                    }
+                    guard !maps.isEmpty else { return }
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.chapters = maps
+                        self.emit()
+                    }
+                }
+            }
         }
     }
 
