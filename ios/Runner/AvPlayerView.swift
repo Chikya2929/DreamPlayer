@@ -484,6 +484,9 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
     /// Pending/active FTP/SFTP uri (dreamplayer `ftp://<serverId>/<path>`),
     /// rebuilt on replay/scrub-after-end like the WebDAV source.
     private var lastFtpUri: String?
+    /// The original URL we resolved for the current playback (file://, http://,
+    /// etc.). Used by chapter probing after reloadSession.
+    private var lastLocalURL: URL?
 
     // ---- SMB stream (see SMBBridge.openShare + SMBSource.swift). The engine
     // reads through a synchronous smb2_pread reader over a live SMBPlayback that
@@ -1047,7 +1050,6 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
 
         // Source pending construction: some sources need background I/O
         var source: MediaSource?
-        var localURL: URL?
         var webDAVSource: (url: URL, headers: [String: String], allowSelfSigned: Bool)?
         var ftpUri: String?
         smbToken = nil
@@ -1097,12 +1099,12 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
             }
             smbServerId = smbResume?.id
             if let resolved = smbUri {
-                localURL = URL(string: resolved)
+                self.lastLocalURL = URL(string: resolved)
             }
             source = nil
         } else if let path, !path.isEmpty {
-            localURL = URL(fileURLWithPath: path)
-            source = .url(localURL!)
+            self.lastLocalURL = URL(fileURLWithPath: path)
+            source = .url(self.lastLocalURL!)
         } else if let uri, uri.lowercased().hasPrefix("ftp://") || uri.lowercased().hasPrefix("sftp://") {
             // FTP/SFTP playback: the engine has no FTP stack, so serve it via
             // FtpClient's ByteRangeSource (plain-FTP REST reads or Citadel
@@ -1110,7 +1112,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
             // the same shape as the WebDAV path below. Built inside the load
             // Task so the blocking handshake never touches the main thread.
             ftpUri = uri
-            localURL = URL(string: uri)
+            self.lastLocalURL = URL(string: uri)
             source = nil
         } else if let uri, let u = URL(string: uri),
                   (u.scheme?.lowercased() == "http" || u.scheme?.lowercased() == "https"),
@@ -1124,10 +1126,10 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
             // loopback producer starves on per-read network round-trips). The
             // source is stateless per read, so the engine's internal reload on
             // audio-track switch is safe.
-            localURL = u
+            self.lastLocalURL = u
             webDAVSource = (u, httpHeaders, allowSelfSigned)
         } else if let uri, let u = URL(string: uri) {
-            localURL = u
+            self.lastLocalURL = u
             source = .url(u)
         } else {
             result(FlutterError(code: "bad_args", message: "Missing path or uri", details: nil))
@@ -1175,8 +1177,8 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
         if let subtitleUri, !subtitleUri.isEmpty, let sub = Self.url(for: subtitleUri) {
             externals.append(ExternalSubtitleTrack(url: sub, isDefault: true, formatHint: sub.pathExtension.lowercased()))
             pendingAutoSubtitleIndex = AetherEngine.externalSubtitleTrackIDBase + 0
-        } else if let localURL, localURL.isFileURL {
-            externals = Self.siblingSubtitles(for: localURL)
+        } else if let fileURL = self.lastLocalURL, fileURL.isFileURL {
+            externals = Self.siblingSubtitles(for: fileURL)
             if let best = externals.firstIndex(where: { $0.isDefault }) {
                 pendingAutoSubtitleIndex = AetherEngine.externalSubtitleTrackIDBase + best
             }
@@ -1346,11 +1348,11 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 self.lastWebDAVInfo = webDAVSource
                 self.lastFtpUri = ftpUri
                 // Capture source scheme + final URL for the network chip.
-                // localURL is the original URL we resolved at the top of open()
+                // lastLocalURL is the original URL we resolved at the top of open()
                 // (file:// for paths, http(s):// for URIs, etc.).
-                self.currentSourceURL = localURL
+                self.currentSourceURL = self.lastLocalURL
                 let scheme: String
-                if let lu = localURL {
+                if let lu = self.lastLocalURL {
                     if ftpUri != nil { scheme = "ftp" } // sftp:// too
                     else { scheme = lu.scheme?.lowercased() ?? "" }
                 } else {
@@ -1414,7 +1416,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 // (HTTP/WebDAV MKVs don't need this — they have no browsable
                 // container on iOS either way). MKV via `MkvChapters`; MP4/MOV
                 // (`moov/udta/chpl` Nero) via the raw box scan (`Mp4Chapters`).
-                if let fileURL = localURL, fileURL.isFileURL {
+                if let fileURL = self.lastLocalURL, fileURL.isFileURL {
                     let ext = fileURL.pathExtension.lowercased()
                     if ["mkv", "mka", "mks", "webm", "mk3d"].contains(ext) {
                         let path = fileURL.path
@@ -1518,8 +1520,8 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 // Best-effort and strictly after playback has started: chapters
                 // are an enhancement, so nothing here may delay or fail the
                 // load. Off the main actor because the reads are network I/O.
-                if localURL == nil || !(localURL?.isFileURL ?? false) {
-                    let ext = (smbFormatHint ?? localURL?.pathExtension ?? "")
+                if self.lastLocalURL == nil || !(self.lastLocalURL?.isFileURL ?? false) {
+                    let ext = (smbFormatHint ?? self.lastLocalURL?.pathExtension ?? "")
                         .lowercased()
                     let isChapterContainer = ChapterProbe.mkvExtensions.contains(ext)
                         || ChapterProbe.mp4Extensions.contains(ext)
@@ -1533,7 +1535,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                         let byteSource = self.chapterByteSource
                         let plainHTTP: URL? = {
                             guard cursor == nil, byteSource == nil,
-                                  let u = localURL,
+                                  let u = self.lastLocalURL,
                                   let scheme = u.scheme?.lowercased(),
                                   scheme == "http" || scheme == "https"
                             else { return nil }
@@ -1677,7 +1679,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
     /// network I/O. Best-effort: nothing here may delay or fail playback.
     private func probeChapters() async {
         // Local files (FileHandle-based parsers).
-        if let fileURL = localURL, fileURL.isFileURL {
+        if let fileURL = self.lastLocalURL, fileURL.isFileURL {
             let ext = fileURL.pathExtension.lowercased()
             if ChapterProbe.mkvExtensions.contains(ext) {
                 let path = fileURL.path
@@ -1707,8 +1709,8 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
 
         // Remote sources (in-app SMB / WebDAV / FTP / plain HTTP).
         // Only if we don't already have a local file URL with chapters.
-        if localURL == nil || !(localURL?.isFileURL ?? false) {
-            let ext = (smbFormatHint ?? localURL?.pathExtension ?? "")
+        if self.lastLocalURL == nil || !(self.lastLocalURL?.isFileURL ?? false) {
+            let ext = (smbFormatHint ?? self.lastLocalURL?.pathExtension ?? "")
                 .lowercased()
             let isChapterContainer = ChapterProbe.mkvExtensions.contains(ext)
                 || ChapterProbe.mp4Extensions.contains(ext)
@@ -1722,7 +1724,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 let byteSource = self.chapterByteSource
                 let plainHTTP: URL? = {
                     guard cursor == nil, byteSource == nil,
-                          let u = localURL,
+                          let u = self.lastLocalURL,
                           let scheme = u.scheme?.lowercased(),
                           scheme == "http" || scheme == "https"
                     else { return nil }
