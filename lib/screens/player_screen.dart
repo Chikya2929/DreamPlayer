@@ -544,17 +544,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     final fresh = TmdService.instance.metaFor(_resumeKey);
     if (fresh != _tmdbMeta) {
       setState(() => _tmdbMeta = fresh);
-      _pushNowPlayingArtwork();
+      _pushNowPlayingMetadata();
     }
   }
 
-  /// Mirrors the matched TMDB poster into the iOS Now Playing card. Called
-  /// whenever `_tmdbMeta` changes; the controller queues it until the platform
-  /// view attaches, so a cached hit at open is safe.
-  void _pushNowPlayingArtwork() {
-    if (!Platform.isIOS) return;
+  /// Mirrors the resolved metadata into the Now Playing card / media
+  /// notification. Called whenever `_tmdbMeta` changes; the controller queues
+  /// it until the platform view attaches, so a cached hit at open is safe.
+  ///
+  /// Title goes before artwork: [PlaybackManager.setTitle] drops the previous
+  /// poster when the title changes (a new video resolved), so the poster has
+  /// to be pushed after it. Both commands are queued in order on the channel.
+  void _pushNowPlayingMetadata() {
     final exo = _exo;
     if (exo == null) return;
+    unawaited(exo.setNowPlayingTitle(_nowPlayingTitle));
     unawaited(exo.setNowPlayingArtwork(_tmdbMeta?.movie.posterUrl(width: 500)));
   }
 
@@ -571,6 +575,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (ext.isNotEmpty && ext.length <= 4) return raw.substring(0, dot);
     }
     return raw;
+  }
+
+  /// Lock-screen / media-notification title: the resolved provider title
+  /// (TMDB, TheTVDB, AVDb, or a Jellyfin item name) instead of the raw file
+  /// name, with the episode identity appended when this is an episode.
+  String get _nowPlayingTitle {
+    final episode = _episodeLine;
+    if (episode == null) return _displayTitle;
+    final name = episode.name;
+    return name == null
+        ? '$_displayTitle · ${episode.code}'
+        : '$_displayTitle · ${episode.code} · $name';
   }
 
   Future<void> _init() async {
@@ -724,7 +740,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           .then((m) {
             if (m != null && mounted) {
               setState(() => _tmdbMeta = m);
-              _pushNowPlayingArtwork();
+              _pushNowPlayingMetadata();
             }
           })
           .catchError((_) {}));
@@ -823,8 +839,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       _exo?.setAudioBoost(_audioBoost);
       _exo?.setNightMode(_nightMode);
       // After `open`, so the lock-screen title and artwork change together.
-      // A cached miss deliberately pushes null and clears the previous poster.
-      _pushNowPlayingArtwork();
+      // A cached miss deliberately clears the previous title/poster.
+      _pushNowPlayingMetadata();
     } catch (e) {
       _setTerminalError('Playback unavailable: $e');
     }

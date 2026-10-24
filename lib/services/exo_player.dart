@@ -538,9 +538,15 @@ abstract class PlaybackController {
   /// (1.0 = fit, up to ~3.0 = zoomed in). Transient per session.
   Future<void> setZoom(double scale);
 
-  /// Sets the artwork shown on the iOS lock screen / Control Center. Pass null
-  /// to clear it. Android keeps its own notification artwork and ignores this.
+  /// Sets the artwork shown on the lock screen / system media controls. Pass
+  /// null to clear it. Android downloads it for the media notification's large
+  /// icon and MediaSession metadata; iOS uses it for Now Playing.
   Future<void> setNowPlayingArtwork(String? url);
+
+  /// Sets the title shown on the lock screen / system media controls. Pass
+  /// null to clear it. Callers should send the resolved metadata title (and
+  /// episode identity) rather than the raw file name.
+  Future<void> setNowPlayingTitle(String? title);
 
   Future<ExoPlayerEvent?> getState();
 
@@ -745,6 +751,10 @@ class ExoPlayerController implements PlaybackController {
   @override
   Future<void> setNowPlayingArtwork(String? url) =>
       _send('setNowPlayingArtwork', {'url': url ?? ''});
+
+  @override
+  Future<void> setNowPlayingTitle(String? title) =>
+      _send('setNowPlayingTitle', {'title': title ?? ''});
 
   Future<void> disposeNative() => _send('dispose');
 

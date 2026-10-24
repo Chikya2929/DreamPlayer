@@ -6,6 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Handler
+import android.os.Looper
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -15,6 +19,12 @@ import androidx.media.session.MediaButtonReceiver
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 
 /**
  * MediaSession + media-notification glue for background playback.
@@ -32,6 +42,12 @@ import androidx.media3.exoplayer.ExoPlayer
  *  - [sync] on every player-state change (called from ExoPlayerView.emit),
  *  - [release] when the platform view is disposed,
  *  - [stop] when the user taps Close or swipes the (paused) notification.
+ *
+ * The matched TMDB poster is pushed in with [setArtwork] and lands in both the
+ * MediaSession metadata (the Android 13+ system media card / lock screen) and
+ * the notification's large icon. Downloading here rather than in Dart keeps
+ * the poster out of the method-channel payload and matches how the iOS side
+ * owns its Now Playing artwork.
  */
 object PlaybackManager {
 
@@ -41,6 +57,16 @@ object PlaybackManager {
     private var session: MediaSessionCompat? = null
     private var player: ExoPlayer? = null
     private var title: String? = null
+
+    /// Current poster (empty = none) plus the decoded bitmap used by both the
+    /// session metadata and the notification. [artworkRequestId] invalidates
+    /// an in-flight download when the title changes or the view is released,
+    /// so a slow response cannot repaint a notification for another video.
+    private var artworkUrl: String? = null
+    private var artworkBitmap: Bitmap? = null
+    private var artworkRequestId = 0
+    private val artworkClient: OkHttpClient by lazy { OkHttpClient() }
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
 
     /// Guards redundant notification rebuilds (position ticker emits ~1/s).
     private var lastNotifyKey: String? = null
@@ -106,8 +132,67 @@ object PlaybackManager {
     }
 
     fun setTitle(value: String?) {
-        title = value?.takeIf { it.isNotBlank() }
+        val next = value?.takeIf { it.isNotBlank() }
+        if (next != title) {
+            // A new video's title arrives before its metadata resolves. Drop
+            // the previous poster now instead of leaving it on the lock screen
+            // until setArtwork() lands (which can take a network round-trip).
+            artworkUrl = null
+            artworkBitmap = null
+            artworkRequestId++
+        }
+        title = next
         lastNotifyKey = null
+    }
+
+    /// Sets the poster shown on the lock screen / in the system media card.
+    /// `null` (or a blank string) clears it. Downloads off the main thread and
+    /// ignores a response whose video has already been replaced.
+    fun setArtwork(context: Context, value: String?) {
+        val url = value?.takeIf { it.isNotBlank() }
+        if (url == artworkUrl) {
+            // The title may have changed with no artwork (or the same artwork)
+            // — still rebuild so the notification shows the new title.
+            sync(context.applicationContext)
+            return
+        }
+        artworkUrl = url
+        val requestId = ++artworkRequestId
+        artworkBitmap = null
+        lastNotifyKey = null
+        val appContext = context.applicationContext
+
+        if (url == null) {
+            sync(appContext)
+            return
+        }
+        // Publish the cleared state immediately; the poster follows when the
+        // download completes (a notification rebuild is already in flight).
+        sync(appContext)
+        artworkClient.newCall(
+            Request.Builder().url(url).header("User-Agent", "DreamPlayer").build(),
+        ).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                val bitmap = response.use { r ->
+                    if (!r.isSuccessful) {
+                        null
+                    } else {
+                        r.body?.byteStream()?.use { BitmapFactory.decodeStream(it) }
+                    }
+                }
+                mainHandler.post {
+                    if (requestId != artworkRequestId) {
+                        bitmap?.recycle()
+                        return@post
+                    }
+                    artworkBitmap = bitmap
+                    lastNotifyKey = null
+                    sync(appContext)
+                }
+            }
+        })
     }
 
     /**
@@ -156,13 +241,20 @@ object PlaybackManager {
                 .setState(stateAction, p.currentPosition, if (playing) p.playbackParameters.speed else 0f)
                 .build(),
         )
-        s.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title ?: "DreamPlayer")
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "DreamPlayer")
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-                .build(),
-        )
+        // The lock screen shows ONLY the system media card, so it carries the
+        // poster here. Our own notification is hidden on the lock screen
+        // (VISIBILITY_SECRET in buildNotification) and appears in the
+        // notification panel, so the two surfaces no longer duplicate on the
+        // lock screen.
+        val metadata = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title ?: "DreamPlayer")
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "DreamPlayer")
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+        artworkBitmap?.let {
+            metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it)
+            metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
+        }
+        s.setMetadata(metadata.build())
 
         // Start the foreground service only when it isn't already running (or
         // still pending its foreground). A redundant startForegroundService per
@@ -242,6 +334,9 @@ object PlaybackManager {
         pendingStop = false
         player = null
         lastNotifyKey = null
+        artworkUrl = null
+        artworkBitmap = null
+        artworkRequestId++
         try {
             session?.isActive = false
             session?.release()
@@ -303,7 +398,11 @@ object PlaybackManager {
             .setContentText("DreamPlayer")
             .setContentIntent(contentPi)
             .setOnlyAlertOnce(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            // The lock screen belongs to the system media card (which carries
+            // the poster via the session metadata). Hiding this row there on a
+            // secure lock screen leaves exactly one media surface; it still
+            // shows normally in the notification panel after unlock.
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(playing)
             .setDeleteIntent(
                 MediaButtonReceiver.buildMediaButtonPendingIntent(
@@ -320,6 +419,10 @@ object PlaybackManager {
             )
             .addAction(button(PlaybackStateCompat.ACTION_FAST_FORWARD, android.R.drawable.ic_media_ff, "Forward 10s"))
             .addAction(button(PlaybackStateCompat.ACTION_STOP, android.R.drawable.ic_menu_close_clear_cancel, "Close"))
+        // Keeps the poster in the notification panel. On the lock screen this
+        // row is hidden (VISIBILITY_SECRET above), so it cannot duplicate the
+        // system media card poster.
+        artworkBitmap?.let { builder.setLargeIcon(it) }
         if (duration > 0) {
             builder.setProgress(duration.toInt(), position.toInt(), false)
         }

@@ -24,13 +24,18 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   Audio always follows the chosen route. Video routing needs the native
   playback path (Apple containers); for FFmpeg-backed containers the picture
   stays on device while audio goes to the receiver.
-- **Lock-screen artwork and skip controls (iOS).** The Now Playing card on the
-  lock screen and in Control Center now shows the matched TMDB poster instead
-  of a blank tile, and its ±10 s skip buttons work — both clamp to the video
-  and restart cleanly from the end, the same path the in-app replay button
-  uses. The poster follows a late metadata match and survives a finished
-  video at pause, and stale downloads are discarded when you change title
-  quickly.
+- **Lock-screen artwork (iOS + Android) and skip controls (iOS).** The Now
+  Playing card on the iOS lock screen and in Control Center now shows the
+  matched TMDB poster instead of a blank tile, and its ±10 s skip buttons work
+  — both clamp to the video and restart cleanly from the end, the same path
+  the in-app replay button uses. The poster follows a late metadata match and
+  survives a finished video at pause, and stale downloads are discarded when
+  you change title quickly. On Android the lock screen keeps the system media
+  card (poster + controls) while our notification stays in the notification
+  panel, so the artwork is not duplicated on the lock screen. The card and the
+  notification now show the resolved TMDB/provider title — with the episode
+  code/name for TV files — instead of the raw file name. A slow poster download
+  is discarded if another video opens first.
 - **Exact 16:9, 4:3, 1.85:1 and 2.39:1 boxes (iOS).** The aspect-ratio picker
   used to approximate the fixed ratios by crop-filling the whole screen, so
   the video did not actually get the shape you chose. Fixed ratios now letter

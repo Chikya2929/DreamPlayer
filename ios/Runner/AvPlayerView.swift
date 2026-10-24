@@ -943,6 +943,11 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                     let url = (args?["url"] as? String) ?? ""
                     self.setNowPlayingArtwork(url.isEmpty ? nil : url)
                     result(nil)
+                case "setNowPlayingTitle":
+                    let title = (args?["title"] as? String) ?? ""
+                    self.mediaTitle = title.isEmpty ? nil : title
+                    self.updateNowPlaying()
+                    result(nil)
                 case "dispose":
                     self.teardownAll()
                     result(nil)

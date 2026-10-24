@@ -1658,6 +1658,19 @@ class ExoPlayerView(
                     applyFitMode(call.argument<Number>("mode")?.toInt() ?: 0)
                     result.success(null)
                 }
+                "setNowPlayingArtwork" -> {
+                    // TMDB poster for the lock screen / system media card. The
+                    // manager downloads it off the main thread and invalidates
+                    // the request if another video opens first.
+                    PlaybackManager.setArtwork(activity, call.argument<String>("url"))
+                    result.success(null)
+                }
+                "setNowPlayingTitle" -> {
+                    // Replaces the raw file name used at open() with the
+                    // resolved TMDB/provider title (plus episode identity).
+                    PlaybackManager.setTitle(call.argument<String>("title"))
+                    result.success(null)
+                }
                 "setSpeed" -> {
                     val speed = (call.argument<Number>("speed")?.toDouble() ?: 1.0)
                         .toFloat()
