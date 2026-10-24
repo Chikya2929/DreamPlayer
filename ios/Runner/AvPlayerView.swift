@@ -1623,7 +1623,7 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
         defer { reloadInFlight = false }
         guard let engine else { return }
         let activeSub = engine.activeSubtitleTrackIndex
-        SBMLog.log("reloadSession: start at \(position)s (smb=\(isSMBStream))")
+        SBMLog.log("reloadSession: start at \(position)s (smb=\(isSMBStream)) autoplay=\(autoplay)")
         do {
             let freshSource = try await buildFreshSource()
             guard let freshSource else {
@@ -1631,14 +1631,18 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 return
             }
             lastSource = freshSource
-             let probe = try await engine.load(source: freshSource, startPosition: position, options: lastLoadOptions)
-             if !autoplay {
-                 // Synchronous, immediately after the session exists and before
-                 // any suspension point, so the default track is audible for
-                 // milliseconds rather than the ~300ms this used to take.
-                 engine.pause()
-                 SBMLog.log("reloadSession: paused on load (autoplay: false)")
-             }
+            // Pass the autoplay preference to the engine so the default track
+            // is never audible when we intend to pause immediately.
+            var options = lastLoadOptions
+            options.autoplay = autoplay
+            let probe = try await engine.load(source: freshSource, startPosition: position, options: options)
+            if !autoplay {
+                // Synchronous, immediately after the session exists and before
+                // any suspension point, so the default track is audible for
+                // milliseconds rather than the ~300ms this used to take.
+                engine.pause()
+                SBMLog.log("reloadSession: paused on load (autoplay: false)")
+            }
              if let probe {
                  // Same-file reload can drop DV info (startPosition load).
                  // Keep the earlier detection instead of regressing to SDR.
