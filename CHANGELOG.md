@@ -223,6 +223,20 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   staggered to their own widths and pushed AVDb onto a second line. Three equal
   cells in one box cannot do either.
 
+- **Chapter markers and previous/next chapter buttons disappeared after
+  changing audio track (iOS).** The chapter probe only ran during the initial
+  load, so a reload triggered by an audio track change cleared the chapter
+  list. The probe now runs again after every `reloadSession`, restoring the
+  seekbar markers and chapter buttons for both local and network sources.
+
+- **Audio track switch briefly played the default track before switching
+  (iOS).** When reloading the session for a track change, the engine's
+  `LoadOptions.autoplay` remained `true` even though the session was meant to
+  be paused immediately. The new session started playing the container's default
+  track for ~300 ms before the pause took effect. `LoadOptions.autoplay` now
+  matches the `reloadSession` parameter so the chosen track is applied on a
+  silent session.
+
 ## 0.5.2
 
 ### Fixed
