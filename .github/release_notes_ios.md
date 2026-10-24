@@ -48,6 +48,12 @@ New:
 • A system AirPlay button in the player, so a speaker or TV can be picked
   without leaving the app. Audio always follows the chosen route; for some
   file types only the sound can be sent and the picture stays on this device.
+• The Now Playing card on the lock screen and in Control Center now shows the
+  matched poster instead of a blank tile, and its skip-back and skip-forward
+  buttons jump ten seconds, stopping cleanly at either end.
+• The 4:3, 16:9, 1.85:1 and 2.39:1 choices in the aspect-ratio menu now give
+  the video exactly that frame instead of approximating it on the full screen.
+  Fit, Crop and Stretch are unchanged.
 • Subtitles now look the way you want them to. Settings → Subtitles covers the
   font, size, text colour and opacity, background colour and opacity, edge
   style (outline, drop shadow or none), vertical position and sync delay, with

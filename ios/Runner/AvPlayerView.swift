@@ -559,16 +559,23 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
     // ---- Background playback: lock screen / control center ----
     /// Media title from Dart's `open` (shown on the lock screen).
     private var mediaTitle: String?
+    /// TMDB poster for the lock-screen card; fetched once per URL.
+    private var artworkURLString: String?
+    private var artworkImage: UIImage?
+    private var artworkTask: URLSessionDataTask?
     /// Remote-command target tokens, removed in deinit.
     private var remoteCommandTokens: [Any] = []
 
     deinit {
+        artworkTask?.cancel()
         let cc = MPRemoteCommandCenter.shared()
         for token in remoteCommandTokens {
             cc.playCommand.removeTarget(token)
             cc.pauseCommand.removeTarget(token)
             cc.togglePlayPauseCommand.removeTarget(token)
             cc.changePlaybackPositionCommand.removeTarget(token)
+            cc.skipForwardCommand.removeTarget(token)
+            cc.skipBackwardCommand.removeTarget(token)
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
@@ -589,6 +596,9 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
         engineView = ev
         container = PlayerContainerView(frame: frame)
         container.backgroundColor = .black
+        // Fixed-ratio modes size the Flutter platform view into a box; the
+        // native crop must not paint outside it.
+        container.clipsToBounds = true
         container.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.engineView = ev
         subtitleOverlay = SubtitleOverlayView(frame: container.bounds)
@@ -928,6 +938,10 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 case "setZoom":
                     let scale = CGFloat((args?["scale"] as? NSNumber)?.doubleValue ?? 1.0)
                     self.setZoom(min(max(scale, 1.0), 3.0))
+                    result(nil)
+                case "setNowPlayingArtwork":
+                    let url = (args?["url"] as? String) ?? ""
+                    self.setNowPlayingArtwork(url.isEmpty ? nil : url)
                     result(nil)
                 case "dispose":
                     self.teardownAll()
@@ -1766,16 +1780,24 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
 
     /// Maps the Dart-side [VideoFitMode] to AVPlayerLayer videoGravity. The
     /// layer lives inside AetherEngine's `AetherPlayerView`; we locate it via
-    /// the view hierarchy. Fixed ratios (16:9 / 4:3) are approximated with
-    /// `.resizeAspectFill` (crop) — exact fixed-ratio boxes need the engine's
-    /// own layout hooks, revisit on-device on the iPad.
+    /// the view hierarchy.
+    ///
+    /// Values: 0 fit, 1 fullscreen, 2 crop, 3 stretch, 4 4:3, 5 16:9,
+    /// 6 1.85:1, 7 2.39:1. The fixed ratios are physically boxed by Dart
+    /// (`ExoPlayerView.fitMode`), so `.resizeAspectFill` here crops the video
+    /// to that box. The FFmpeg custom-source path has no AVPlayerLayer, so it
+    /// keeps the engine's own aspect fit inside the box (no crop) — PiP and
+    /// native containers are the cases this fully controls.
     private func setResizeMode(_ mode: Int) {
         guard let playerLayer = findPlayerLayer() else { return }
         let gravity: AVLayerVideoGravity
         switch mode {
-        case 1, 3, 4: gravity = .resizeAspectFill // crop / fixed ratios
-        case 2: gravity = .resize // stretch
-        default: gravity = .resizeAspect // fit
+        case 1, 2, 4, 5, 6, 7:
+            gravity = .resizeAspectFill // fullscreen / crop / fixed ratios
+        case 3:
+            gravity = .resize // stretch
+        default:
+            gravity = .resizeAspect // fit
         }
         if playerLayer.videoGravity != gravity {
             playerLayer.videoGravity = gravity
@@ -2127,6 +2149,64 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
                 }
                 return .success
             })
+        // ±10 s for Control Center, the lock screen, and headset remotes.
+        cc.skipForwardCommand.isEnabled = true
+        cc.skipForwardCommand.preferredIntervals = [10]
+        remoteCommandTokens.append(
+            cc.skipForwardCommand.addTarget { [weak self] _ in
+                self?.remoteSkip(by: 10) ?? .commandFailed
+            })
+        cc.skipBackwardCommand.isEnabled = true
+        cc.skipBackwardCommand.preferredIntervals = [10]
+        remoteCommandTokens.append(
+            cc.skipBackwardCommand.addTarget { [weak self] _ in
+                self?.remoteSkip(by: -10) ?? .commandFailed
+            })
+    }
+
+    /// Shared ±10 s handler. Clamps to the media bounds, and reloads when the
+    /// engine has already parked at `.ended` (seek is a no-op there).
+    private func remoteSkip(by delta: Double) -> MPRemoteCommandHandlerStatus {
+        guard let engine else { return .commandFailed }
+        var target = max(0, engine.currentTime + delta)
+        if engine.duration > 0 {
+            target = min(target, engine.duration)
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if self.engine?.state == .ended {
+                await self.reloadSession(at: target)
+            } else {
+                await self.engine?.seek(to: target)
+            }
+            self.updateNowPlaying()
+        }
+        return .success
+    }
+
+    /// Loads the TMDB poster for the lock-screen card. A newer URL cancels the
+    /// in-flight fetch, and a late response for a previous file is discarded.
+    private func setNowPlayingArtwork(_ url: String?) {
+        if url == artworkURLString { return }
+        artworkURLString = url
+        artworkTask?.cancel()
+        artworkTask = nil
+        artworkImage = nil
+        guard let url, let parsed = URL(string: url) else {
+            updateNowPlaying()
+            return
+        }
+        updateNowPlaying()
+        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, _, _ in
+            guard let self, let data, let image = UIImage(data: data) else { return }
+            Task { @MainActor in
+                guard self.artworkURLString == url else { return }
+                self.artworkImage = image
+                self.updateNowPlaying()
+            }
+        }
+        artworkTask = task
+        task.resume()
     }
 
     /// Mirrors engine state into MPNowPlayingInfoCenter so the lock screen /
@@ -2142,19 +2222,29 @@ final class AvPlayerView: NSObject, FlutterPlatformView, FlutterStreamHandler {
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
             info[MPNowPlayingInfoPropertyPlaybackRate] = 0
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = engine.duration
+            if let artworkImage {
+                info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(
+                    boundsSize: artworkImage.size
+                ) { _ in artworkImage }
+            }
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             return
         default:
             break
         }
         let playing = engine.state == .playing
-        let info: [String: Any] = [
+        var info: [String: Any] = [
             MPMediaItemPropertyTitle: mediaTitle ?? "DreamPlayer",
             MPMediaItemPropertyArtist: "DreamPlayer",
             MPMediaItemPropertyPlaybackDuration: max(0, engine.duration),
             MPNowPlayingInfoPropertyElapsedPlaybackTime: max(0, engine.currentTime),
             MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0,
         ]
+        if let artworkImage {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(
+                boundsSize: artworkImage.size
+            ) { _ in artworkImage }
+        }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 

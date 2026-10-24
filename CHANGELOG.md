@@ -24,6 +24,20 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   Audio always follows the chosen route. Video routing needs the native
   playback path (Apple containers); for FFmpeg-backed containers the picture
   stays on device while audio goes to the receiver.
+- **Lock-screen artwork and skip controls (iOS).** The Now Playing card on the
+  lock screen and in Control Center now shows the matched TMDB poster instead
+  of a blank tile, and its ±10 s skip buttons work — both clamp to the video
+  and restart cleanly from the end, the same path the in-app replay button
+  uses. The poster follows a late metadata match and survives a finished
+  video at pause, and stale downloads are discarded when you change title
+  quickly.
+- **Exact 16:9, 4:3, 1.85:1 and 2.39:1 boxes (iOS).** The aspect-ratio picker
+  used to approximate the fixed ratios by crop-filling the whole screen, so
+  the video did not actually get the shape you chose. Fixed ratios now letter
+  or pillar-box the video to the exact frame, while Fit, Crop and Stretch keep
+  their existing behaviour. FFmpeg-backed containers (MKV/TS/AVI/WebM) still
+  keep their own aspect fit inside that box, because the native player layer
+  is not used for them.
 - **YouTube-style caption appearance.** Subtitle settings now cover font
   family (default, sans serif, serif, monospace, casual, cursive), size, text
   color and opacity, background color and opacity, and five edge styles (none,

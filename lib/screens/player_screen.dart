@@ -544,7 +544,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     final fresh = TmdService.instance.metaFor(_resumeKey);
     if (fresh != _tmdbMeta) {
       setState(() => _tmdbMeta = fresh);
+      _pushNowPlayingArtwork();
     }
+  }
+
+  /// Mirrors the matched TMDB poster into the iOS Now Playing card. Called
+  /// whenever `_tmdbMeta` changes; the controller queues it until the platform
+  /// view attaches, so a cached hit at open is safe.
+  void _pushNowPlayingArtwork() {
+    if (!Platform.isIOS) return;
+    final exo = _exo;
+    if (exo == null) return;
+    unawaited(exo.setNowPlayingArtwork(_tmdbMeta?.movie.posterUrl(width: 500)));
   }
 
   /// Top-bar title: the TMDB-fetched title when a match resolved, else the
@@ -711,7 +722,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       unawaited(TmdService.instance
           .resolve(video)
           .then((m) {
-            if (m != null && mounted) setState(() => _tmdbMeta = m);
+            if (m != null && mounted) {
+              setState(() => _tmdbMeta = m);
+              _pushNowPlayingArtwork();
+            }
           })
           .catchError((_) {}));
     }
@@ -808,6 +822,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _exo?.setSpeed(_playbackSpeed);
       _exo?.setAudioBoost(_audioBoost);
       _exo?.setNightMode(_nightMode);
+      // After `open`, so the lock-screen title and artwork change together.
+      // A cached miss deliberately pushes null and clears the previous poster.
+      _pushNowPlayingArtwork();
     } catch (e) {
       _setTerminalError('Playback unavailable: $e');
     }
@@ -7058,7 +7075,10 @@ if (mounted) setState(_applySwipeValue);
                     child: MpvSurfaceView(controller: _mpvSurface!),
                   ))
             : _exo != null && _error == null
-                ? ExoPlayerView(controller: _exo! as ExoPlayerController)
+                ? ExoPlayerView(
+                    controller: _exo! as ExoPlayerController,
+                    fitMode: _fitMode,
+                  )
                 : Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(

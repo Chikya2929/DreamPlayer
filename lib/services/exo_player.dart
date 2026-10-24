@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show Factory;
+import 'package:flutter/foundation.dart' show Factory, visibleForTesting;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
@@ -538,6 +538,10 @@ abstract class PlaybackController {
   /// (1.0 = fit, up to ~3.0 = zoomed in). Transient per session.
   Future<void> setZoom(double scale);
 
+  /// Sets the artwork shown on the iOS lock screen / Control Center. Pass null
+  /// to clear it. Android keeps its own notification artwork and ignores this.
+  Future<void> setNowPlayingArtwork(String? url);
+
   Future<ExoPlayerEvent?> getState();
 
   Future<void> dispose();
@@ -738,6 +742,10 @@ class ExoPlayerController implements PlaybackController {
   Future<void> setZoom(double scale) =>
       _send('setZoom', {'scale': scale.clamp(1.0, 3.0)});
 
+  @override
+  Future<void> setNowPlayingArtwork(String? url) =>
+      _send('setNowPlayingArtwork', {'url': url ?? ''});
+
   Future<void> disposeNative() => _send('dispose');
 
   Future<void> _send(String method, [Map<String, dynamic>? args]) {
@@ -765,6 +773,26 @@ class ExoPlayerController implements PlaybackController {
   }
 }
 
+/// Sizes the iOS playback platform view inside its parent.
+///
+/// Non-fixed modes fill the available space. Fixed-ratio modes get the largest
+/// centred box of that ratio; the native `videoGravity` then crops the video to
+/// that box instead of to the screen. Kept as a pure function so the arithmetic
+/// is unit-tested — a too-wide box silently turns "Crop to 16:9" into
+/// "letterbox to 16:9 on a wider screen".
+@visibleForTesting
+Size iosFitBoxSize(Size available, VideoFitMode mode) {
+  final ratio = mode.fixedAspect;
+  if (ratio == null) return available;
+  final width = available.width;
+  final height = available.height;
+  if (!width.isFinite || !height.isFinite) return available;
+  if (width <= 0 || height <= 0) return Size.zero;
+  final boxHeight = width / ratio;
+  if (boxHeight <= height) return Size(width, boxHeight);
+  return Size(height * ratio, height);
+}
+
 /// Embeds the native playback engine platform view.
 ///
 /// Android: the ExoPlayer/Media3 [PlayerView]'s internal `SurfaceView` is
@@ -789,23 +817,43 @@ class ExoPlayerController implements PlaybackController {
 /// renders on its own Core Animation layer so the display receives the native
 /// HDR signal.
 class ExoPlayerView extends StatelessWidget {
-  const ExoPlayerView({super.key, required this.controller});
+  const ExoPlayerView({
+    super.key,
+    required this.controller,
+    this.fitMode = VideoFitMode.fit,
+  });
 
   final ExoPlayerController controller;
+
+  /// Only affects iOS: fixed-ratio modes are physically boxed in Flutter so
+  /// the native crop happens against the box, not the screen. Android applies
+  /// the same modes natively via `ForcedAspectPlayerView`.
+  final VideoFitMode fitMode;
 
   @override
   Widget build(BuildContext context) {
     if (Platform.isIOS) {
-      // Wrap in SizedBox.expand so the platform view always fills its
-      // parent with tight constraints — prevents a stale loose-constraint
-      // layout after lock/unlock (the UiKitView frame lags behind
-      // Flutter's layout when the device wakes).
-      return SizedBox.expand(
-        child: UiKitView(
-          viewType: exoPlayerViewType,
-          onPlatformViewCreated: controller._attach,
-          creationParamsCodec: const StandardMessageCodec(),
-        ),
+      // The widget TREE must stay identical when the mode changes, or Flutter
+      // recreates the UIKitView and playback dies. Only the SizedBox size
+      // changes. A full-size box keeps the old tight-constraint behaviour that
+      // prevents a stale layout after lock/unlock.
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final box = iosFitBoxSize(constraints.biggest, fitMode);
+          return Center(
+            child: SizedBox(
+              width: box.width,
+              height: box.height,
+              child: ClipRect(
+                child: UiKitView(
+                  viewType: exoPlayerViewType,
+                  onPlatformViewCreated: controller._attach,
+                  creationParamsCodec: const StandardMessageCodec(),
+                ),
+              ),
+            ),
+          );
+        },
       );
     }
     // This platform view is the single playback surface on every platform:
