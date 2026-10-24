@@ -7,6 +7,23 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **Library search from Home.** The Home app bar now has a search button for
+  everything already in the library: shows, season folders, individual
+  episodes, movies and manual groups. It matches titles, file names, episode
+  codes and original titles as you type, is accent- and case-insensitive, and
+  works offline — metadata only enriches entries that are already on the grid,
+  it never adds results that cannot be played. Each row names its source and
+  opens the same details, seasons or group screen the card would.
+- **Player keyboard shortcuts.** With a hardware keyboard attached (iPad,
+  Chromebook, desktop) `K` or Space plays and pauses, `J` / `L` skip back and
+  forward 10 s, `F` toggles fullscreen, and while the controls are hidden the
+  left/right arrows seek instead of doing nothing. TV remotes are untouched:
+  their arrow keys still move focus.
+- **AirPlay route picker (iOS).** The player's top bar hosts the system
+  `AVRoutePickerView`, so a receiver can be chosen without leaving the app.
+  Audio always follows the chosen route. Video routing needs the native
+  playback path (Apple containers); for FFmpeg-backed containers the picture
+  stays on device while audio goes to the receiver.
 - **YouTube-style caption appearance.** Subtitle settings now cover font
   family (default, sans serif, serif, monospace, casual, cursive), size, text
   color and opacity, background color and opacity, and five edge styles (none,
@@ -27,13 +44,15 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   cache filename, so multi-word families (`Playfair Display`, `Fira Code`)
   apply too.
 - **In-app update prompt.** On Android the app now checks the GitHub release
-  feed at most once a day when it opens, and offers the newer build directly:
-  release notes, a download with progress, and the system installer. It picks
-  the APK matching the device's ABI, so a split install is never handed a
-  universal build (which Android would reject as a downgrade). Settings →
-  About gains **Check for updates** and an auto-check switch, and the prompt's
-  **Skip this version** is remembered. iOS is untouched — the App Store owns
-  updates there.
+  feed at most once a day when it opens, and offers the newer build in a
+  dedicated sheet: the installed and new versions side by side, that release's
+  notes under **What's new** (the install guide that follows them in the
+  release body is not shown), and download progress with megabytes and a
+  percentage before the system installer opens. It picks the APK matching the
+  device's ABI, so a split install is never handed a universal build (which
+  Android would reject as a downgrade). Settings → About gains **Check for
+  updates** and an auto-check switch, and the prompt's **Skip this version** is
+  remembered. iOS is untouched — the App Store owns updates there.
 
 ## 0.5.3
 

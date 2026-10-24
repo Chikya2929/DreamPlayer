@@ -17,6 +17,7 @@
 		A1B2C3D5000000000000001A /* ChapterReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000001A /* ChapterReader.swift */; };
 		26E6D1F10DFEB72427073BEB /* IconSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100275A7D118B50E161A7AFF /* IconSwitcher.swift */; };
 		A1B2C3D5000000000000001B /* ChapterProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000001B /* ChapterProbe.swift */; };
+		A1B2C3D5000000000000001C /* AirPlayButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000001C /* AirPlayButtonView.swift */; };
 		A1B2C3D50000000000000013 /* Mp4Chapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000013 /* Mp4Chapters.swift */; };
 		A1B2C3D50000000000000014 /* FtpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000014 /* FtpClient.swift */; };
 		A1B2C3D50000000000000016 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000016 /* Citadel */; };
@@ -83,6 +84,7 @@
 		A1B2C3D4000000000000001A /* ChapterReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterReader.swift; sourceTree = "<group>"; };
 		100275A7D118B50E161A7AFF /* IconSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconSwitcher.swift; sourceTree = "<group>"; };
 		A1B2C3D4000000000000001B /* ChapterProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterProbe.swift; sourceTree = "<group>"; };
+		A1B2C3D4000000000000001C /* AirPlayButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayButtonView.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000013 /* Mp4Chapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mp4Chapters.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000014 /* FtpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FtpClient.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000008 /* UpnpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpnpClient.swift; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 				A1B2C3D4000000000000001A /* ChapterReader.swift */,
 				100275A7D118B50E161A7AFF /* IconSwitcher.swift */,
 				A1B2C3D4000000000000001B /* ChapterProbe.swift */,
+				A1B2C3D4000000000000001C /* AirPlayButtonView.swift */,
 				A1B2C3D40000000000000013 /* Mp4Chapters.swift */,
 				A1B2C3D40000000000000014 /* FtpClient.swift */,
 				A1B2C3D40000000000000008 /* UpnpClient.swift */,
@@ -374,6 +377,7 @@
 				A1B2C3D5000000000000001A /* ChapterReader.swift in Sources */,
 				26E6D1F10DFEB72427073BEB /* IconSwitcher.swift in Sources */,
 				A1B2C3D5000000000000001B /* ChapterProbe.swift in Sources */,
+				A1B2C3D5000000000000001C /* AirPlayButtonView.swift in Sources */,
 				A1B2C3D50000000000000013 /* Mp4Chapters.swift in Sources */,
 				A1B2C3D50000000000000014 /* FtpClient.swift in Sources */,
 				A1B2C3D50000000000000008 /* UpnpClient.swift in Sources */,

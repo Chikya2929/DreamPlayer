@@ -61,8 +61,36 @@ void main() {
       expect(AppUpdater.cleanReleaseNotes('\n\nFixed.\n\nNew.\n\n'), 'Fixed.\n\nNew.');
     });
 
+    test('strips bold and inline code markers', () {
+      expect(
+        AppUpdater.cleanReleaseNotes('**New** `search` screen'),
+        'New search screen',
+      );
+    });
+
+    test('caps very long notes', () {
+      final cleaned = AppUpdater.cleanReleaseNotes('x' * 5000);
+      expect(cleaned.length, 2001);
+      expect(cleaned.endsWith('\u2026'), isTrue);
+    });
+
     test('empty body stays empty', () {
       expect(AppUpdater.cleanReleaseNotes(''), '');
+    });
+  });
+
+  group('releaseNotesSection', () {
+    test('keeps the version entry and drops the install guide', () {
+      const body = '## 0.5.4\n\n### Added\n- Search\n\n'
+          '## Download & install\n\nLong guide.';
+      expect(
+        AppUpdater.releaseNotesSection(body),
+        '## 0.5.4\n\n### Added\n- Search\n',
+      );
+    });
+
+    test('a body without headings is returned whole', () {
+      expect(AppUpdater.releaseNotesSection('Just notes.'), 'Just notes.');
     });
   });
 

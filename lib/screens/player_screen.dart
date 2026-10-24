@@ -56,6 +56,7 @@ import '../utils/codec_info.dart';
 import '../utils/vc1_codec.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
+import '../widgets/airplay_button.dart';
 import '../widgets/format_chip.dart';
 import 'player_error.dart';
 import '../services/entitlements.dart';
@@ -6459,6 +6460,49 @@ if (mounted) setState(_applySwipeValue);
     } catch (_) {}
   }
 
+  /// Hardware-keyboard shortcuts for players without a remote (iPad with a
+  /// keyboard, Chromebook, desktop builds).
+  ///
+  /// TV remotes never reach this: their D-pad handling is above and
+  /// deliberately different — arrow keys move focus there, so stealing them
+  /// for seeking would break navigation. Returns true when the key was used.
+  ///
+  /// Arrow seeking applies only while the controls are hidden; with them
+  /// visible the arrows still move focus between the transport buttons.
+  /// Play/pause and fullscreen ignore key repeats, or holding K would toggle
+  /// playback dozens of times.
+  bool _handleKeyboardShortcut(
+    LogicalKeyboardKey key, {
+    required bool keyDown,
+  }) {
+    if (key == LogicalKeyboardKey.keyK || key == LogicalKeyboardKey.space) {
+      if (keyDown) unawaited(_togglePlayPause());
+      _showControls();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.keyJ) {
+      _seekBy(const Duration(seconds: -10));
+      return true;
+    }
+    if (key == LogicalKeyboardKey.keyL) {
+      _seekBy(const Duration(seconds: 10));
+      return true;
+    }
+    if (key == LogicalKeyboardKey.keyF) {
+      if (keyDown) unawaited(_toggleFullscreen());
+      return true;
+    }
+    if (!_controlsVisible &&
+        (key == LogicalKeyboardKey.arrowLeft ||
+            key == LogicalKeyboardKey.arrowRight)) {
+      _seekBy(Duration(
+        seconds: key == LogicalKeyboardKey.arrowLeft ? -10 : 10,
+      ));
+      return true;
+    }
+    return false;
+  }
+
   void _seekBy(Duration delta) {
     if (_touchLocked) return;
     if (_mpvReady) {
@@ -7230,6 +7274,10 @@ if (mounted) setState(_applySwipeValue);
             _togglePlayPause();
             _showControls();
             return KeyEventResult.handled;
+          } else if (!_isTv &&
+              !_inPip &&
+              _handleKeyboardShortcut(key, keyDown: event is KeyDownEvent)) {
+            return KeyEventResult.handled;
           } else if (key == LogicalKeyboardKey.arrowUp ||
               key == LogicalKeyboardKey.arrowDown) {
             _showControls();
@@ -7581,6 +7629,10 @@ if (mounted) setState(_applySwipeValue);
                                 ],
                               ),
                             ),
+                             if (AirPlayButton.isSupported) ...[
+                               const AirPlayButton(),
+                               const SizedBox(width: 4),
+                             ],
                              _TvControlButton(
                                  onPressed: _openVideoInfoSheet,
                                  icon: const Icon(Icons.info_outline),

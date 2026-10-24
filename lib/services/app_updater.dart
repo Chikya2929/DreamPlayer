@@ -145,7 +145,9 @@ class AppUpdater {
       return AvailableUpdate(
         version: version,
         installedVersion: info.version,
-        notes: cleanReleaseNotes(json['body'] as String? ?? ''),
+        notes: cleanReleaseNotes(
+          releaseNotesSection(json['body'] as String? ?? ''),
+        ),
         assetUrl: url,
       );
     } finally {
@@ -158,13 +160,15 @@ class AppUpdater {
   /// the whole thing again.
   static Future<File> download(
     AvailableUpdate update, {
-    required void Function(double? progress) onProgress,
+    required void Function(double? progress, int received, int total)
+        onProgress,
     bool Function()? isCancelled,
   }) async {
     final dir = await _updateDir();
     final file = File('${dir.path}/${update.fileName}');
     if (await file.exists() && await file.length() > 0) {
-      onProgress(1);
+      final length = await file.length();
+      onProgress(1, length, length);
       await _prune(dir, keep: file.path);
       return file;
     }
@@ -195,7 +199,7 @@ class AppUpdater {
         }
         sink.add(chunk);
         received += chunk.length;
-        onProgress(total > 0 ? received / total : null);
+        onProgress(total > 0 ? received / total : null, received, total);
       }
       await sink.flush();
       await sink.close();
@@ -206,7 +210,7 @@ class AppUpdater {
       }
       _deleteQuietly(file);
       await part.rename(file.path);
-      onProgress(1);
+      onProgress(1, received, received);
       await _prune(dir, keep: file.path);
       return file;
     } catch (_) {
@@ -272,6 +276,22 @@ class AppUpdater {
 
   /// Light de-markup for release notes: changelog headings lose their `###`,
   /// list dashes become bullets, and markdown links keep only their text.
+  /// A GitHub release body is the version's changelog entry followed by the
+  /// long "Download & install" guide. The prompt only has room for the entry,
+  /// and the guide is not what changed, so keep the first top-level section.
+  static String releaseNotesSection(String body) {
+    final buffer = <String>[];
+    var seenHeading = false;
+    for (final line in body.split('\n')) {
+      if (line.startsWith('## ')) {
+        if (seenHeading) break;
+        seenHeading = true;
+      }
+      buffer.add(line);
+    }
+    return buffer.join('\n');
+  }
+
   static String cleanReleaseNotes(String body) {
     final lines = <String>[];
     for (final raw in body.split('\n')) {
@@ -286,9 +306,23 @@ class AppUpdater {
         RegExp(r'\[([^\]]+)\]\((?:[^()]|\([^)]*\))*\)'),
         (m) => m.group(1) ?? '',
       );
+      line = line.replaceAllMapped(
+        RegExp(r'\*\*([^*]+)\*\*'),
+        (m) => m.group(1) ?? '',
+      );
+      line = line.replaceAllMapped(
+        RegExp(r'`([^`]+)`'),
+        (m) => m.group(1) ?? '',
+      );
       lines.add(line);
     }
-    return lines.join('\n').trim();
+    var cleaned = lines.join('\n').trim();
+    // The dialog shows a fixed-height scroll well; a whole changelog pasted
+    // into it is not read past the first screen anyway.
+    if (cleaned.length > 2000) {
+      cleaned = '${cleaned.substring(0, 2000)}…';
+    }
+    return cleaned;
   }
 
   /// Numeric dotted compare. `0.5.10 > 0.5.9`, unlike a string compare.

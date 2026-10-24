@@ -76,6 +76,10 @@ import Network
       AvPlayerViewFactory(messenger: messenger),
       withId: "dreamplayer/exo_player"
     )
+    registrar.register(
+      AirPlayButtonFactory(),
+      withId: "dreamplayer/airplay"
+    )
     FileBrowser.register(with: messenger)
     TheTvdbCredentialStore.register(with: messenger)
     IntentBridge.shared.configure(with: messenger)

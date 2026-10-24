@@ -32,6 +32,8 @@ class _UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<_UpdateDialog> {
   _Phase _phase = _Phase.prompt;
   double? _progress;
+  int _received = 0;
+  int _total = 0;
   bool _cancelled = false;
   String? _error;
   File? _apk;
@@ -40,6 +42,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     setState(() {
       _phase = _Phase.downloading;
       _progress = 0;
+      _received = 0;
+      _total = 0;
       _cancelled = false;
       _error = null;
     });
@@ -47,7 +51,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       final apk = await AppUpdater.download(
         widget.update,
         isCancelled: () => _cancelled,
-        onProgress: (p) {
+        onProgress: (p, received, total) {
           if (!mounted || _cancelled) return;
           // A 100 MB transfer emits thousands of chunks; only repaint when the
           // shown percentage actually moves.
@@ -56,7 +60,11 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             final next = (p * 100).floor();
             if (shown == next) return;
           }
-          setState(() => _progress = p);
+          setState(() {
+            _progress = p;
+            _received = received;
+            _total = total;
+          });
         },
       );
       if (!mounted || _cancelled) return;
@@ -74,7 +82,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       }
       setState(() {
         _phase = _Phase.error;
-        _error = e is SocketException ? 'Check your connection and try again.' : 'Download failed.';
+        _error = e is SocketException
+            ? 'Check your connection and try again.'
+            : 'Download failed.';
       });
     }
   }
@@ -98,102 +108,272 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final size = MediaQuery.sizeOf(context);
+
     return PopScope(
       canPop: _phase != _Phase.downloading,
-      child: AlertDialog(
-        title: Text(switch (_phase) {
-          _Phase.permission => 'Allow installs',
-          _ => 'Update available',
-        }),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: SizedBox(
-            width: double.maxFinite,
-            child: switch (_phase) {
-              _Phase.prompt => _prompt(theme),
-              _Phase.downloading => _downloading(theme),
-              _Phase.permission => _permission(theme),
-              _Phase.error => Text(_error ?? 'Something went wrong.'),
-            },
+      child: Dialog(
+        backgroundColor: colorScheme.surfaceContainerHigh,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: ConstrainedBox(
+          // Keeps the changelog column readable on tablets/landscape.
+          constraints: BoxConstraints(
+            maxWidth: 480,
+            maxHeight: size.height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _header(theme),
+                const SizedBox(height: 20),
+                _versionRow(theme),
+                if (widget.update.needsOneTimeUninstall) ...[
+                  const SizedBox(height: 16),
+                  _uninstallWarning(theme),
+                ],
+                const SizedBox(height: 20),
+                ..._body(theme),
+                const SizedBox(height: 24),
+                ..._actions(theme),
+              ],
+            ),
           ),
         ),
-        actions: _actions(),
       ),
     );
   }
 
-  Widget _prompt(ThemeData theme) {
-    final update = widget.update;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _header(ThemeData theme) {
+    final colorScheme = theme.colorScheme;
+    return Row(
       children: [
-        Text(
-          'DreamPlayer ${update.version} is available. '
-          'You have ${update.installedVersion}.',
-          style: theme.textTheme.bodyMedium,
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(
+            switch (_phase) {
+              _Phase.permission => Icons.settings_rounded,
+              _Phase.error => Icons.error_outline_rounded,
+              _ => Icons.system_update_rounded,
+            },
+            color: colorScheme.onPrimaryContainer,
+            size: 28,
+          ),
         ),
-        if (update.needsOneTimeUninstall) ...[
-          const SizedBox(height: 8),
-          Row(
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.info_outline, size: 16, color: theme.colorScheme.tertiary),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'This release uses a new signing key. If the install is '
-                  'refused, uninstall the old app once and install again. '
-                  'Uninstalling clears DreamPlayer\'s settings and resume '
-                  'positions; your video files are untouched.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.tertiary,
-                  ),
+              Text(
+                switch (_phase) {
+                  _Phase.permission => 'Allow installs',
+                  _ => 'Update available',
+                },
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                switch (_phase) {
+                  _Phase.permission =>
+                    'One system setting is needed to finish.',
+                  _Phase.error => 'The update did not finish.',
+                  _Phase.downloading => 'Downloading the new version…',
+                  _ => 'A newer version of DreamPlayer is ready.',
+                },
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: _phase == _Phase.error
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
           ),
-        ],
-        if (update.notes.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 240),
-            child: SingleChildScrollView(
-              child: Text(
-                update.notes,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _versionRow(ThemeData theme) {
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: _VersionChip(
+              label: 'Current',
+              version: widget.update.installedVersion,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Icon(
+            Icons.arrow_forward_rounded,
+            size: 20,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: _VersionChip(
+              label: 'New',
+              version: widget.update.version,
+              isNew: true,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _uninstallWarning(ThemeData theme) {
+    final colorScheme = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.info_outline, size: 16, color: colorScheme.tertiary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'This release uses a new signing key. If the install is refused, '
+            'uninstall the old app once and install again. Uninstalling clears '
+            "DreamPlayer's settings and resume positions; your video files are "
+            'untouched.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.tertiary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _body(ThemeData theme) {
+    if (_phase == _Phase.downloading) return [_downloading(theme)];
+    if (_phase == _Phase.permission) return [_permission(theme)];
+    if (_phase == _Phase.error) {
+      return [
+        Text(
+          _error ?? 'Something went wrong.',
+          style: theme.textTheme.bodyMedium,
+        ),
+      ];
+    }
+    return [_notes(theme)];
+  }
+
+  Widget _notes(ThemeData theme) {
+    final update = widget.update;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "What's new",
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 180),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              update.notes.isEmpty
+                  ? 'See the release page for details.'
+                  : update.notes,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+            ),
+          ),
+        ),
       ],
     );
   }
 
   Widget _downloading(ThemeData theme) {
+    final colorScheme = theme.colorScheme;
     final progress = _progress;
-    final percent = progress == null ? null : (progress * 100).clamp(0, 100).toStringAsFixed(0);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          percent == null ? 'Downloading the update…' : 'Downloading the update… $percent%',
-          style: theme.textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 12),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(value: progress),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'The install screen opens when it finishes.',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+    final percent = progress == null
+        ? null
+        : (progress * 100).clamp(0, 100).toStringAsFixed(0);
+    final receivedLabel = _total > 0
+        ? '${_megabytes(_received)} / ${_megabytes(_total)} MB'
+        : _received > 0
+        ? '${_megabytes(_received)} MB'
+        : 'Starting…';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Downloading update',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(value: progress, minHeight: 6),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                receivedLabel,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (percent != null)
+                Text(
+                  '$percent%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -206,62 +386,189 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     );
   }
 
-  List<Widget> _actions() {
+  List<Widget> _actions(ThemeData theme) {
     switch (_phase) {
       case _Phase.prompt:
         return [
-          TextButton(
-            onPressed: () async {
-              await AppUpdater.skipVersion(widget.update.version);
-              if (mounted) Navigator.of(context).pop();
-            },
-            child: const Text('Skip this version'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _startDownload,
+              icon: const Icon(Icons.download_rounded, size: 20),
+              label: const Text('Download & install'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Later'),
-          ),
-          FilledButton(
-            onPressed: _startDownload,
-            child: const Text('Update now'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () async {
+                    await AppUpdater.skipVersion(widget.update.version);
+                    if (mounted) Navigator.of(context).pop();
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Skip this version',
+                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Later'),
+                ),
+              ),
+            ],
           ),
         ];
       case _Phase.downloading:
         return [
-          TextButton(
-            onPressed: () => setState(() {
-              _cancelled = true;
-              _phase = _Phase.prompt;
-            }),
-            child: const Text('Cancel'),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => setState(() {
+                _cancelled = true;
+                _phase = _Phase.prompt;
+              }),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Cancel'),
+            ),
           ),
         ];
       case _Phase.permission:
         return [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: AppUpdater.openInstallPermissionSettings,
+                  child: const Text('Open settings'),
+                ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: AppUpdater.openInstallPermissionSettings,
-            child: const Text('Open settings'),
-          ),
-          FilledButton(
-            onPressed: _apk == null ? null : () => _install(_apk!),
-            child: const Text('Install'),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _apk == null ? null : () => _install(_apk!),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Install'),
+            ),
           ),
         ];
       case _Phase.error:
         return [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-          FilledButton(
-            onPressed: _startDownload,
-            child: const Text('Try again'),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Close'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _startDownload,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Try again'),
+                ),
+              ),
+            ],
           ),
         ];
     }
+  }
+
+  static String _megabytes(int bytes) =>
+      (bytes / (1024 * 1024)).toStringAsFixed(1);
+}
+
+class _VersionChip extends StatelessWidget {
+  const _VersionChip({
+    required this.label,
+    required this.version,
+    this.isNew = false,
+  });
+
+  final String label;
+  final String version;
+  final bool isNew;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Column(
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isNew ? colorScheme.primaryContainer : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            'v$version',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: isNew
+                  ? colorScheme.onPrimaryContainer
+                  : colorScheme.onSurfaceVariant,
+              fontWeight: isNew ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

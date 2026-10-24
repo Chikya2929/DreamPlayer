@@ -200,6 +200,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _autoCheckUpdates = enabled);
   }
 
+  Future<void> _previewUpdateDialog() async {
+    final installed = await _loadVersion();
+    if (!mounted) return;
+    await showAppUpdateDialog(
+      context,
+      AvailableUpdate(
+        version: '0.5.5',
+        installedVersion: installed.split('+').first,
+        notes: 'Added\n'
+            '\u2022 Library search from Home, with accent-insensitive '
+            'matching\n'
+            '\u2022 Player keyboard shortcuts for hardware keyboards\n'
+            '\u2022 AirPlay route picker on iOS\n'
+            '\n'
+            'Fixed\n'
+            '\u2022 Downloaded Google Fonts now reach the video on iPad\n'
+            '\u2022 Chapter marks no longer disappear on in-app SMB',
+        assetUrl: 'https://github.com/mangeshghodke/DreamPlayer/releases/'
+            'download/v0.5.5/DreamPlayer-0.5.5-arm64-v8a.apk',
+      ),
+    );
+  }
+
   Future<void> _checkForUpdates() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -1739,6 +1762,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       if (mounted) setState(() => _autoCheckUpdates = v);
                     },
                   ),
+                  if (kDebugMode)
+                    TvTile(
+                      leading: const Icon(Icons.bug_report, color: Colors.orange),
+                      title: const Text(
+                        'Preview update prompt',
+                        style: TextStyle(color: Colors.orange),
+                      ),
+                      subtitle: const Text(
+                        'Debug only — sample release notes, no download',
+                      ),
+                      onTap: _previewUpdateDialog,
+                    ),
                 ],
                 TvTile(
                   leading: const Icon(Icons.info_outline),

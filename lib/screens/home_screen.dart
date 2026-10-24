@@ -38,6 +38,7 @@ import '../widgets/group_poster_dialog.dart';
 import '../widgets/tv_text_field.dart';
 import 'ftp_screen.dart';
 import 'player_screen.dart';
+import 'library_search_screen.dart';
 import 'series_seasons_screen.dart';
 import '../widgets/tv_overscan.dart';
 import '../widgets/video_card.dart';
@@ -1057,6 +1058,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// the season/episode view would render a lone film as "Episode 1" with no
   /// way to play it. Everything else opens [SeriesSeasonsScreen] for the
   /// Nova-style season poster grid UI.
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const LibrarySearchScreen()),
+    );
+  }
+
   void _openGroup(SeriesGroup group) {
     // Manual groups (user-selected cards) always open MovieGroupScreen —
     // the grid-of-cards pattern, header only when a member has TMDB info.
@@ -1793,12 +1800,19 @@ class _HomeScreenState extends State<HomeScreen>
                       const PopupMenuItem(value: 'clear', child: Text('Clear selection')),
                     ],
                   ),
-                ] else if (_seriesGroups.isNotEmpty || _entries.isNotEmpty)
+                ] else ...[
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep_outlined),
-                    tooltip: AppLocalizations.of(context).homeClearAll,
-                    onPressed: _clearAll,
+                    icon: const Icon(Icons.search),
+                    tooltip: 'Search library',
+                    onPressed: _openSearch,
                   ),
+                  if (_seriesGroups.isNotEmpty || _entries.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.delete_sweep_outlined),
+                      tooltip: AppLocalizations.of(context).homeClearAll,
+                      onPressed: _clearAll,
+                    ),
+                ],
               ],
             ),
             // ---- Your library: user-added folders (e.g. TV-show folders) ----

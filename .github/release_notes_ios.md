@@ -38,6 +38,16 @@ true of the intended build but not of the one that was reviewed. Verify with
 ## 0.5.4
 
 New:
+• Search your library from the Home screen. A search button matches shows,
+  seasons, episodes and films by title, file name or episode code as you type —
+  accents and capitals do not matter — and works without a connection. Every
+  result opens the same page as the matching card on the Home screen.
+• Keyboard shortcuts when a hardware keyboard is attached: K or Space to play
+  and pause, J and L to skip back and forward ten seconds, F for fullscreen,
+  and the left and right arrows to skip while the controls are hidden.
+• A system AirPlay button in the player, so a speaker or TV can be picked
+  without leaving the app. Audio always follows the chosen route; for some
+  file types only the sound can be sent and the picture stays on this device.
 • Subtitles now look the way you want them to. Settings → Subtitles covers the
   font, size, text colour and opacity, background colour and opacity, edge
   style (outline, drop shadow or none), vertical position and sync delay, with

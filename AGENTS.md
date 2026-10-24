@@ -808,6 +808,19 @@ tag against `PackageInfo.version` and downloads the APK; the native half
   Settings → About. **Skip this version** persists the tag. A successful check
   writes `dreamplayer.lastUpdateCheck` even when the request failed — one
   retry per day, not one per launch.
+- **The prompt is a `Dialog`, not an `AlertDialog`** (`update_dialog.dart`): a
+  header tile, current → new version chips, the release notes in a
+  fixed-height scroll well, then full-width **Download & install** with
+  **Skip this version** / **Later** beneath it. Download progress shows both
+  MB and a percentage, so `AppUpdater.download`'s callback carries
+  `(fraction, received, total)`. Keeping the actions in a `Column` avoids the
+  `OverflowBar`/`Spacer` trap the server dialogs hit.
+- **The GitHub release body is the changelog entry PLUS the long "Download &
+  install" guide** (`release.yml` appends `.github/release_notes.md`), so
+  `AppUpdater.releaseNotesSection` keeps only the first `##` section before
+  `cleanReleaseNotes` runs. Without it the prompt's "What's new" is really the
+  reinstall instructions. `cleanReleaseNotes` also strips bold/backtick
+  markers and caps the result at 2000 chars.
 - **Pick the ABI-named asset, never "the newest".** `release.yml` publishes
   `DreamPlayer-<version>-{universal,arm64-v8a,armeabi-v7a,x86_64}.apk`, and
   `--split-per-abi` sets `arm64 2043` against `universal 43`. Handing an
@@ -1909,6 +1922,56 @@ Two rules hold it together:
 ### Backdrop hero is width-derived (0.5.1+25)
 
 `CollapsingBackdrop` + `backdropExpandedHeight` in `lib/widgets/collapsing_backdrop.dart`, shared by the details, series-seasons and group screens. It used to be duplicated byte-identically in all three and hardcoded to 200–220 px, which is why tablets showed a thin cropped strip: a 16:9 backdrop at a **fixed** height shows proportionally less of the image as the screen widens. At 200 px a 390-wide phone still fits the full width, while a 1024-wide iPad shows barely a third of the image's height. The height is now `width * 9 / 16` clamped to 200..62% of the viewport height — full image in portrait on any device, slightly cropped in landscape — and `alignment: Alignment(0, -0.25)` biases upward when it does crop, because the subject in movie artwork sits above centre.
+
+### Library search, keyboard shortcuts, AirPlay (0.5.4)
+
+**Library search is offline, and deliberately so.** `LibrarySearchScreen`
+(`lib/screens/library_search_screen.dart`) searches exactly what Home already
+renders: `LibraryFoldersStore` entries grouped by `SeriesGroupingService`,
+individual `isFile` entries, and `ManualGroupsStore` groups. Searching *inside*
+an unexpanded network folder is out of scope: it is one network round-trip per
+folder per keystroke, and the results would not be playable until that folder is
+opened anyway. TMDB metadata only **enriches** entries that exist — it never
+adds results — so a search works with no connection and every row can be opened.
+
+A file entry's title is `ParsedFileName.parse(...).title` (so
+`Dark.S01E05.mkv` reads "Dark", with `S01E05` as secondary) unless a cached show
+title exists. Matching rules live in `lib/utils/search_match.dart` and are pure
+(`normalizeForSearch` / `searchMatches` / `searchRank`): accents are folded
+(`Amélie` → `amelie`), punctuation becomes a space, and every query token must
+appear. Rank 0 = prefix, 1 = contains in the primary title, 2 = matched only a
+secondary field, so typing a show name puts the show above its episodes. Do not
+re-implement any of this per screen — Home's search button is the only entry
+point and `test/search_match_test.dart` + `test/library_search_test.dart` pin it.
+
+**Player keyboard shortcuts are gated to non-TV.** `_handleKeyboardShortcut`
+(`player_screen.dart`) is called from the **non-TV** branch of the
+`FocusScope.onKeyEvent` chain. The TV branches return before it, because their
+arrow keys move focus between the transport buttons — stealing them for seek
+would break remote navigation. Keys: `K`/Space play-pause, `J`/`L` ∓10 s, `F`
+fullscreen, and left/right seek **only while the controls are hidden** (with
+them visible they still move focus). Play-pause and fullscreen act on
+`KeyDownEvent` only, or holding a key toggles dozens of times.
+
+**AirPlay is the system control in a platform view, not a button.**
+`AVRoutePickerView` has no public presentation API, so
+`ios/Runner/AirPlayButtonView.swift` hosts the real control (`viewType
+dreamplayer/airplay`) and `lib/widgets/airplay_button.dart` embeds it. Three
+things are load-bearing:
+- **A new Swift file must be in `project.pbxproj`** (PBXBuildFile +
+  PBXFileReference + group + Runner sources phase). `tool/ios_native_check.py`
+  fails with "on disk but not in any PBXSourcesBuildPhase", which is exactly the
+  mistake that otherwise compiles to nothing and fails at link.
+- **`EagerGestureRecognizer` is required**, or the player's tap/swipe catchers
+  win the gesture arena and the picker never opens.
+- **`AirPlayButton.isSupported` (`Platform.isIOS`)** must guard both the widget
+  and its placement: a `UiKitView` on Android/desktop, or in a widget test, waits
+  on a platform-view creation that never answers.
+Video AirPlay only works on the native AVPlayer path (Apple containers);
+FFmpeg-backed containers (MKV/TS/AVI/WebM) can route **audio** only because
+AirPlay video needs an `AVPlayerLayer`. The picker is still shown for both — an
+audio-only route to a speaker is a valid use — and the release notes say so
+plainly rather than implying the picture moves.
 
 ### Player feature backlog (prioritized 2026-09)
 
