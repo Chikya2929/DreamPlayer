@@ -15,6 +15,7 @@ import 'services/entitlements.dart';
 import 'services/image_cache_service.dart';
 import 'services/language_service.dart';
 import 'services/metadata_provider_adapter.dart';
+import 'services/r18dev_adapter.dart';
 import 'services/layout_store.dart';
 import 'services/font_store.dart';
 import 'utils/tv_helper.dart';
@@ -39,6 +40,14 @@ Future<void> main() async {
   // External metadata providers (issue #46 part 2). Registered here so the
   // Settings "External" segment appears as soon as an adapter exists; the
   // registry is inert until a provider is enabled.
+  //
+  // r18.dev is registered FIRST on purpose (issue #52): it is the richer of
+  // the two for adult titles (uncensored title, studio, gallery) and it is
+  // keyed by the catalogue code in the file name, so it is the better first
+  // answer for a JAV file. AVDb still answers anything r18.dev does not
+  // (it can search by name, r18.dev only by code), and either provider can be
+  // turned off on its own.
+  MetadataProviderRegistry.instance.register(R18DevAdapter.instance);
   MetadataProviderRegistry.instance.register(AvdbAdapter.instance);
   // Write a boot line FIRST, before any screen can fail. Without it, "no
   // app_debug.log in Files" is ambiguous: it cannot tell a broken writer from

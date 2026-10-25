@@ -294,7 +294,9 @@ class _TmdbFixMatchDialogState extends State<TmdbFixMatchDialog> {
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
-                      'Add a TMDB or TheTVDB API key in Settings → Metadata to search.',
+                      'Enable a metadata provider in Settings → Metadata to '
+                      'search — add a TMDB or TheTVDB API key, or turn on '
+                      'AVDb or r18.dev (no key needed).',
                       textAlign: TextAlign.center,
                       style:
                           TextStyle(color: colorScheme.onSurfaceVariant),

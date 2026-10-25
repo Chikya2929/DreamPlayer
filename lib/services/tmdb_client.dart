@@ -70,6 +70,7 @@ class TmdMovie {
     this.provider = MetadataProvider.tmdb,
     this.originalTitle,
     this.alternateTitles = const [],
+    this.providerId,
   });
 
   final int id;
@@ -84,9 +85,24 @@ class TmdMovie {
   final String? originalTitle;
   final List<String> alternateTitles;
 
+  /// The provider's OWN id for this title, when it is not the integer [id].
+  ///
+  /// Most providers use integers (TMDB, TheTVDB, AVDb), but r18.dev keys its
+  /// catalogue by a string `content_id` ("1svfla012"). An adapter that has a
+  /// non-integer id puts it here, and [id] carries a stable hash of it — the
+  /// integer is only ever an opaque cache key.
+  ///
+  /// This matters because the cache and the "is this still the same match?"
+  /// checks are keyed on [providerKey]: without the real id, two different
+  /// r18.dev titles could collide, and a cached title could not be re-fetched
+  /// after a restart.
+  final String? providerId;
+
   int? get tmdbId => provider == MetadataProvider.tmdb ? id : null;
 
-  String get providerKey => '${provider.name}:${kind.name}:$id';
+  String get providerKey => providerId != null
+      ? '${provider.name}:${kind.name}:$providerId'
+      : '${provider.name}:${kind.name}:$id';
 
   String? posterUrl({int width = 342}) =>
       metadataImageUrl(posterPath, width: width);
@@ -114,6 +130,7 @@ class TmdMovie {
         provider: provider,
         originalTitle: originalTitle,
         alternateTitles: alternateTitles,
+        providerId: providerId,
       );
 
   /// Backfills this item's artwork from a richer provider record.
@@ -152,6 +169,7 @@ class TmdMovie {
       provider: metadataProviderFromName(json['provider'] as String?),
       originalTitle: json[kind == TmdKind.movie ? 'original_title' : 'original_name'] as String?,
       alternateTitles: _stringList(json['alternateTitles']),
+      providerId: json['providerId'] as String?,
     );
   }
 
@@ -167,6 +185,7 @@ class TmdMovie {
     'provider': provider.name,
         'originalTitle': originalTitle,
     'alternateTitles': alternateTitles,
+        'providerId': providerId,
       };
 
   factory TmdMovie.fromMetaJson(Map<String, dynamic> json) => TmdMovie(
@@ -181,6 +200,7 @@ class TmdMovie {
     provider: metadataProviderFromName(json['provider'] as String?),
         originalTitle: json['originalTitle'] as String?,
     alternateTitles: _stringList(json['alternateTitles']),
+        providerId: json['providerId'] as String?,
       );
 }
 
@@ -3565,10 +3585,8 @@ static int? _trailingPartNumber(String folderName) {
   Future<void> fetchSeasonNames(TmdMovie? movie) async {
     if (movie == null || movie.kind != TmdKind.tv || movie.id <= 0) return;
     try {
-      final names = movie.provider == MetadataProvider.theTvdb
-          ? await _theTvdb.seasonNames(movie)
-          : await _api.seasonNames(movie);
-    if (names.isNotEmpty) {
+      final names = await _seasonNamesFor(movie);
+      if (names.isNotEmpty) {
         _seasonNamesCache[_seasonKeyForMovie(movie)] = names;
       _savePersistedSeasonNames();
     }
@@ -3583,10 +3601,8 @@ static int? _trailingPartNumber(String folderName) {
     final cached = _seasonNamesCache[key];
     if (cached != null) return cached;
     try {
-      final names = meta.movie.provider == MetadataProvider.theTvdb
-          ? await _theTvdb.seasonNames(meta.movie)
-          : await _api.seasonNames(meta.movie);
-    if (names.isNotEmpty) {
+      final names = await _seasonNamesFor(meta.movie);
+      if (names.isNotEmpty) {
         _seasonNamesCache[key] = names;
       _savePersistedSeasonNames();
     }
@@ -3692,9 +3708,7 @@ static int? _trailingPartNumber(String folderName) {
     if (match.movie.kind == TmdKind.tv) {
       var names = <int, String>{};
       try {
-        names = match.movie.provider == MetadataProvider.theTvdb
-            ? await _theTvdb.seasonNames(match.movie)
-            : await _api.seasonNames(match.movie);
+        names = await _seasonNamesFor(match.movie);
       } catch (_) {}
       _seasonNamesCache[_seasonKeyForMovie(match.movie)] = names;
       _savePersistedSeasonNames();
@@ -4034,12 +4048,62 @@ static int? _trailingPartNumber(String folderName) {
 
   Future<TmdDetails?> detailsForMovie(TmdMovie movie) async {
     try {
-      return movie.provider == MetadataProvider.theTvdb
-          ? await _theTvdb.details(movie)
-          : await _api.details(movie);
+      return switch (movie.provider) {
+        MetadataProvider.theTvdb => await _theTvdb.details(movie),
+        MetadataProvider.external => await _externalDetails(movie),
+        MetadataProvider.tmdb => await _api.details(movie),
+      };
     } catch (_) {
       return null;
     }
+  }
+
+  /// Season names for a series, dispatched on the provider that matched it.
+  ///
+  /// An external catalogue has its own id space, so TMDB must never be asked
+  /// for an external id — it would answer with an unrelated series' seasons.
+  Future<Map<int, String>> _seasonNamesFor(TmdMovie movie) async {
+    switch (movie.provider) {
+      case MetadataProvider.theTvdb:
+        return _theTvdb.seasonNames(movie);
+      case MetadataProvider.external:
+        final names = <int, String>{};
+        for (final adapter
+            in await MetadataProviderRegistry.instance.configured()) {
+          try {
+            for (final season in await adapter.seasons(movie)) {
+              if (season.name.trim().isNotEmpty) {
+                names[season.seasonNumber] = season.name.trim();
+              }
+            }
+            if (names.isNotEmpty) return names;
+          } catch (_) {
+            // Try the next adapter.
+          }
+        }
+        return const {};
+      case MetadataProvider.tmdb:
+        return _api.seasonNames(movie);
+    }
+  }
+
+  /// Full details for a movie that came from an external adapter (issue #52).
+  ///
+  /// An adapter's id space is its OWN. Asking TMDB for an AVDb id returned a
+  /// completely unrelated film — AVDb's #495175 is not TMDB's #495175 — and
+  /// the wrong synopsis/poster was written over the AVDb match, so picking an
+  /// AVDb title in the Get info dialog quietly turned it into a random TMDB
+  /// movie. The adapter is asked for its own record instead.
+  Future<TmdDetails?> _externalDetails(TmdMovie movie) async {
+    for (final adapter in await MetadataProviderRegistry.instance.configured()) {
+      try {
+        final details = await adapter.details(movie);
+        if (details != null) return details;
+      } catch (_) {
+        // Try the next adapter.
+      }
+    }
+    return null;
   }
 
   /// Fetches full details (synopsis, cast, runtime) for a matched video.
@@ -4055,9 +4119,11 @@ static int? _trailingPartNumber(String folderName) {
     if (meta == null) return null;
     if (!force && meta.details != null) return meta.details;
     try {
-      final details = meta.movie.provider == MetadataProvider.theTvdb
-          ? await _theTvdb.details(meta.movie)
-          : await _api.details(meta.movie);
+      final details = switch (meta.movie.provider) {
+        MetadataProvider.theTvdb => await _theTvdb.details(meta.movie),
+        MetadataProvider.external => await _externalDetails(meta.movie),
+        MetadataProvider.tmdb => await _api.details(meta.movie),
+      };
       if (details == null) return null;
       // Merge onto the FRESHEST cache entry, not the snapshot taken before the
       // network call — a concurrent seasonFor/withDetails write may have added
@@ -4297,10 +4363,8 @@ static int? _trailingPartNumber(String folderName) {
     var names = _seasonNamesCache[seasonKey];
     if (names == null || names.isEmpty) {
       try {
-        names = movie.provider == MetadataProvider.theTvdb
-            ? await _theTvdb.seasonNames(movie)
-            : await _api.seasonNames(movie);
-      if (names.isNotEmpty) {
+        names = await _seasonNamesFor(movie);
+        if (names.isNotEmpty) {
           _seasonNamesCache[seasonKey] = names;
         await _savePersistedSeasonNames();
       }

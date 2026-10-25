@@ -143,7 +143,9 @@ class _GroupPosterDialogState extends State<GroupPosterDialog> {
         child: Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Add a TMDB or TheTVDB API key in Settings → Metadata to search.',
+            'Enable a metadata provider in Settings → Metadata to search — add '
+            'a TMDB or TheTVDB API key, or turn on AVDb or r18.dev (no key '
+            'needed).',
             textAlign: TextAlign.center,
           ),
         ),

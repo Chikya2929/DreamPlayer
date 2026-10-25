@@ -103,8 +103,14 @@ void main() {
     });
 
     test('falls back to thumb_url when poster_url is absent', () async {
-      final adapter = buildAdapter(response: _decode(detailEnvelope.replaceAll(
-          '"poster_url": "https://upload18.cc/v/miaa-818/poster.jpg",','')));
+      final adapter = buildAdapter(
+        response: _decode(
+          detailEnvelope.replaceAll(
+            '"poster_url": "https://upload18.cc/v/miaa-818/poster.jpg",',
+            '',
+          ),
+        ),
+      );
       final movie = (await adapter.search('miaa-818')).single;
       expect(movie.posterPath, 'https://upload18.cc/v/miaa-818/thumb.jpg');
     });
@@ -115,14 +121,17 @@ void main() {
       expect(movie.alternateTitles, contains('MIAA-818'));
     });
 
-    test('a record with no artwork yields a null poster, not a bad URL', () async {
-      // ac=list genuinely omits it; the row must fall back to its icon rather
-      // than pointing at image.tmdb.org with an AVDb path.
-      final adapter = buildAdapter(response: _decode(listEnvelope));
-      final movie = (await adapter.search('sakura')).single;
-      expect(movie.posterPath, isNull);
-      expect(movie.posterUrl(), isNull);
-    });
+    test(
+      'a record with no artwork yields a null poster, not a bad URL',
+      () async {
+        // ac=list genuinely omits it; the row must fall back to its icon rather
+        // than pointing at image.tmdb.org with an AVDb path.
+        final adapter = buildAdapter(response: _decode(listEnvelope));
+        final movie = (await adapter.search('sakura')).single;
+        expect(movie.posterPath, isNull);
+        expect(movie.posterUrl(), isNull);
+      },
+    );
 
     test('refuses TV — AVDb is a movie catalogue', () async {
       final adapter = buildAdapter();
@@ -131,20 +140,25 @@ void main() {
 
     test('an empty query is not sent to the network', () async {
       var calls = 0;
-      final adapter = AvdbAdapter(transport: (uri) async {
-        calls++;
-        return _decode(detailEnvelope);
-      });
+      final adapter = AvdbAdapter(
+        transport: (uri) async {
+          calls++;
+          return _decode(detailEnvelope);
+        },
+      );
       expect(await adapter.search('   '), isEmpty);
       expect(calls, 0);
     });
 
-    test('a provider-level failure is treated as no match, not an error', () async {
-      // Maccms signals failure with code != 1; a body without `list` must not
-      // blow up the caller that is mid-resolution across providers.
-      final adapter = buildAdapter(response: const <String, dynamic>{});
-      expect(await adapter.search('miaa-818'), isEmpty);
-    });
+    test(
+      'a provider-level failure is treated as no match, not an error',
+      () async {
+        // Maccms signals failure with code != 1; a body without `list` must not
+        // blow up the caller that is mid-resolution across providers.
+        final adapter = buildAdapter(response: const <String, dynamic>{});
+        expect(await adapter.search('miaa-818'), isEmpty);
+      },
+    );
 
     test('a throwing transport also yields no match', () async {
       final adapter = AvdbAdapter(
@@ -155,13 +169,107 @@ void main() {
 
     test('the query is sent as a detail search, not a list browse', () async {
       Uri? seen;
-      final adapter = AvdbAdapter(transport: (uri) async {
-        seen = uri;
-        return _decode(detailEnvelope);
-      });
+      final adapter = AvdbAdapter(
+        transport: (uri) async {
+          seen = uri;
+          return _decode(detailEnvelope);
+        },
+      );
       await adapter.search('miaa 818');
       expect(seen!.queryParameters['ac'], 'detail');
       expect(seen!.queryParameters['wd'], 'miaa 818');
+    });
+
+    // Issue #52: the reporter typed the catalogue code three ways —
+    // "SVFLA-012", "SVFLA012" and "SVFLA 012". Measured live against
+    // avdbapi.com: the hyphen and the space both match, the separator-less
+    // spelling matches NOTHING. The adapter therefore retries the
+    // separator-less form with the hyphen the catalogue actually uses.
+    group('catalogue-code spellings (issue #52)', () {
+      test('queryVariants adds the hyphenated form of a bare code', () {
+        expect(AvdbAdapter.queryVariants('SVFLA012'), [
+          'SVFLA012',
+          'SVFLA-012',
+        ]);
+      });
+
+      test('queryVariants leaves an already-hyphenated code alone', () {
+        expect(AvdbAdapter.queryVariants('SVFLA-012'), ['SVFLA-012']);
+      });
+
+      test('queryVariants leaves an ordinary title alone', () {
+        expect(AvdbAdapter.queryVariants('Some Movie'), ['Some Movie']);
+      });
+
+      test('a separator-less code is retried with the hyphen', () async {
+        final seen = <String>[];
+        final adapter = AvdbAdapter(
+          transport: (uri) async {
+            final term = uri.queryParameters['wd'] ?? '';
+            seen.add(term);
+            // The bare form finds nothing, exactly like the live service.
+            if (term == 'SVFLA012') {
+              return {'code': 1, 'list': const []};
+            }
+            return _decode(detailEnvelope);
+          },
+        );
+        final results = await adapter.search('SVFLA012');
+        expect(results, hasLength(1));
+        expect(seen, ['SVFLA012', 'SVFLA-012']);
+      });
+
+      test('the first spelling that hits is the one that is used', () async {
+        final seen = <String>[];
+        final adapter = AvdbAdapter(
+          transport: (uri) async {
+            final term = uri.queryParameters['wd'] ?? '';
+            seen.add(term);
+            return _decode(detailEnvelope);
+          },
+        );
+        await adapter.search('SVFLA-012');
+        expect(seen, ['SVFLA-012']);
+      });
+    });
+
+    // The live `origin_name` carries HTML entities ("SVFLA-012
+    // "Doesn&#039;t my ...""), which used to be shown raw.
+    group('HTML entities (issue #52)', () {
+      test('decodes the entities AVDb leaves in its text', () {
+        // The live `origin_name` is HTML-escaped by the catalogue:
+        // SVFLA-012 \u0026quot;Doesn\u0026039;t my ...\u0026quot;
+        expect(
+          AvdbAdapter.unescapeHtml(
+            'SVFLA-012 \u0026quot;Doesn\u0026039;t my \u0026quot;',
+          ),
+          'SVFLA-012 "Doesn\'t my "',
+        );
+      });
+
+      test('a plain string is untouched', () {
+        expect(
+          AvdbAdapter.unescapeHtml('MIAA-818 (original)'),
+          'MIAA-818 (original)',
+        );
+      });
+
+      test('an escaped ampersand stays a single ampersand', () {
+        expect(AvdbAdapter.unescapeHtml('a &amp; b'), 'a & b');
+      });
+
+      test('the parsed original title carries the decoded text', () async {
+        final adapter = buildAdapter(
+          response: _decode(
+            detailEnvelope.replaceAll(
+              'MIAA-818 (original)',
+              'SVFLA-012 \u0026quot;Doesn\u0026039;t my ...\u0026quot;',
+            ),
+          ),
+        );
+        final movie = (await adapter.search('miaa-818')).single;
+        expect(movie.originalTitle, 'SVFLA-012 "Doesn\'t my ..."');
+      });
     });
 
     // Issue #49: a user who knows the numeric id is the most precise input
@@ -170,10 +278,12 @@ void main() {
     group('id search', () {
       Future<Uri?> capture(String query) async {
         Uri? seen;
-        final adapter = AvdbAdapter(transport: (uri) async {
-          seen = uri;
-          return _decode(detailEnvelope);
-        });
+        final adapter = AvdbAdapter(
+          transport: (uri) async {
+            seen = uri;
+            return _decode(detailEnvelope);
+          },
+        );
         await adapter.search(query);
         return seen;
       }
@@ -249,11 +359,14 @@ void main() {
       await AvdbAdapter.instance.setEnabled(false);
     });
 
-    test('defaults to disabled, so nothing is queried out of the box', () async {
-      SharedPreferences.setMockInitialValues({});
-      final adapter = AvdbAdapter();
-      expect(await adapter.isConfigured(), isFalse);
-    });
+    test(
+      'defaults to disabled, so nothing is queried out of the box',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final adapter = AvdbAdapter();
+        expect(await adapter.isConfigured(), isFalse);
+      },
+    );
 
     test('persists the switch and reloads it', () async {
       SharedPreferences.setMockInitialValues({});

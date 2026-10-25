@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'image_cache_service.dart';
@@ -108,6 +109,40 @@ class AvdbAdapter extends MetadataProviderAdapter {
     final term = query.trim();
     if (term.isEmpty) return const [];
 
+    // AVDb's `wd=` matches literally against `name`/`tag`/`category`/`movie_code`,
+    // so the separator matters. Measured live against avdbapi.com (issue #52):
+    //   wd=SVFLA-012 -> 2 hits
+    //   wd=SVFLA 012 -> 2 hits
+    //   wd=SVFLA012  -> 0 hits
+    // The separator-less spelling is what a file name often carries, so it is
+    // retried with the hyphen the catalogue actually uses.
+    for (final variant in queryVariants(term)) {
+      final hits = await _searchTerm(variant);
+      if (hits.isNotEmpty) return hits;
+    }
+    return const [];
+  }
+
+  /// The spellings of [term] to try, in order.
+  ///
+  /// Only the separator-less catalogue-code form needs a second attempt:
+  /// "SVFLA012" -> "SVFLA-012". Everything else is searched as typed, because
+  /// AVDb's own index already covers the hyphen and the space.
+  ///
+  /// Exposed for tests: the shape of a JAV code is the subtle part.
+  @visibleForTesting
+  static List<String> queryVariants(String term) {
+    final variants = <String>[term];
+    final match = RegExp(r'^([A-Za-z]{1,12})[-_ ]?(\d{2,4})$').firstMatch(term);
+    if (match != null) {
+      final hyphenated = '${match.group(1)}-${match.group(2)}';
+      if (!variants.contains(hyphenated)) variants.add(hyphenated);
+    }
+    return variants;
+  }
+
+  /// One `wd=`/`ids=` query against the catalogue.
+  Future<List<TmdMovie>> _searchTerm(String term) async {
     Uri uri;
     try {
       // Issue #49: AVDb has no title-unique search that covers everything, and
@@ -124,7 +159,9 @@ class AvdbAdapter extends MetadataProviderAdapter {
       final id = int.tryParse(term);
       uri = id != null && id > 0
           ? Uri.parse('$baseUrl?ac=detail&ids=$id')
-          : Uri.parse('$baseUrl?ac=detail&wd=${Uri.encodeQueryComponent(term)}');
+          : Uri.parse(
+              '$baseUrl?ac=detail&wd=${Uri.encodeQueryComponent(term)}',
+            );
     } on FormatException {
       return const [];
     }
@@ -221,7 +258,28 @@ class AvdbAdapter extends MetadataProviderAdapter {
   static String? _string(dynamic value) {
     if (value == null) return null;
     final text = value is String ? value.trim() : value.toString().trim();
-    return text.isEmpty ? null : text;
+    if (text.isEmpty) return null;
+    return unescapeHtml(text);
+  }
+
+  /// Decodes the HTML entities AVDb leaves in its text fields.
+  ///
+  /// Measured live (issue #52): `origin_name` comes back as
+  /// `SVFLA-012 "Doesn&#039;t my ..."`, so the raw entity text was
+  /// being shown to the user as the original title. Only the five entities
+  /// that actually appear in these fields are handled, and an unknown entity
+  /// is left alone rather than swallowed.
+  @visibleForTesting
+  static String unescapeHtml(String value) {
+    if (!value.contains('\u0026')) return value;
+    return value
+        .replaceAll('\u0026quot;', '"')
+        .replaceAll('\u0026039;', "'")
+        .replaceAll('\u0026apos;', "'")
+        .replaceAll('\u0026lt;', '<')
+        .replaceAll('\u0026gt;', '>')
+        .replaceAll('\u0026nbsp;', ' ')
+        .replaceAll('\u0026amp;', '\u0026');
   }
 
   static int? _intValue(dynamic value) {
@@ -261,9 +319,7 @@ class AvdbAdapter extends MetadataProviderAdapter {
       final single = _string(value);
       return single == null ? const [] : <String>[single];
     }
-    return <String>[
-      for (final item in value) ?_string(item),
-    ];
+    return <String>[for (final item in value) ?_string(item)];
   }
 
   static String? _firstString(Map<String, dynamic> map, List<String> keys) {

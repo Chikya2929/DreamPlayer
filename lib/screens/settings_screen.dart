@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/adult_content_store.dart';
 import '../services/auto_play_store.dart';
 import '../services/avdb_adapter.dart';
+import '../services/r18dev_adapter.dart';
 import '../services/badge_prefs.dart';
 import '../services/cache_cleaner.dart';
 import '../services/decoder_mode.dart';
@@ -98,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _theTvdbStorageError;
   bool _includeAdult = false;
   bool _avdbEnabled = false;
+  bool _r18devEnabled = false;
 
   /// Adapters registered by an external metadata provider (issue #46 part 2,
   /// e.g. AVDb). Empty until one ships, in which case the "External" segment
@@ -438,6 +440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _metadataProvider = await TheTvdbClient.providerChoice();
       final includeAdult = await AdultContentStore().load();
       final avdbEnabled = await AvdbAdapter.instance.isEnabled();
+      final r18devEnabled = await R18DevAdapter.instance.isEnabled();
       if (!mounted) return;
       setState(() {
         _theTvdbKey = store.apiKey ?? '';
@@ -446,6 +449,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _theTvdbStorageError = null;
         _includeAdult = includeAdult;
         _avdbEnabled = avdbEnabled;
+        _r18devEnabled = r18devEnabled;
       });
     } catch (_) {
       if (!mounted) return;
@@ -639,9 +643,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'you enable it below.',
         MetadataProviderChoice.theTvdb =>
           'TheTVDB resolves everything. TMDB is not queried.',
-        MetadataProviderChoice.external =>
-          'The external provider resolves everything. TMDB is not queried '
-              'unless it is enabled as a fallback.',
+        MetadataProviderChoice.external => _externalAdapters.isEmpty
+            ? 'No external provider is available.'
+            : '${_externalAdapters.map((a) => a.label).join(' and ')} '
+                'resolve everything first. TMDB is queried only if they '
+                'find nothing.',
       };
 
   /// Credential dialog for an external adapter (issue #46 part 2).
@@ -695,6 +701,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await TmdService.instance.clearAllResolved();
     if (!mounted) return;
     setState(() => _avdbEnabled = value);
+  }
+
+  /// r18.dev on/off (issue #52). Same cache-clearing rule as AVDb: a file that
+  /// matched nothing while the provider was off may resolve once it is on.
+  Future<void> _setR18devEnabled(bool value) async {
+    await R18DevAdapter.instance.setEnabled(value);
+    await TmdService.instance.clearAllResolved();
+    if (!mounted) return;
+    setState(() => _r18devEnabled = value);
   }
 
   /// Adult metadata (issue #46 part 1). Cached metadata is cleared because a
@@ -1668,6 +1683,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                              'search by name, code or ID'),
                          value: _avdbEnabled,
                          onChanged: _setAvdbEnabled,
+                       )
+                     else if (adapter is R18DevAdapter)
+                       SwitchListTile(
+                         secondary: const Icon(Icons.extension),
+                         title: const Text('Enable r18.dev'),
+                         // r18.dev is keyed by the catalogue code in the file
+                         // name (issue #52) and carries the studio, the cast
+                         // and the uncensored title. It needs no key.
+                         subtitle: const Text(
+                             'No key needed · Japanese adult video · '
+                             'search by catalogue code'),
+                         value: _r18devEnabled,
+                         onChanged: _setR18devEnabled,
                        )
                      else
                        TvTile(

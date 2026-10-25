@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'metadata_provider_adapter.dart';
 import 'tmdb_client.dart';
 import 'the_tvdb_client.dart';
 
@@ -16,15 +17,31 @@ import 'the_tvdb_client.dart';
 /// This mirrors the preference order the automatic resolver already uses
 /// (`TmdService` tries TMDB first, then falls back to TheTVDB when there is
 /// no confident match) — the dialogs now simply *look* like that too.
+///
+/// **External adapters count as providers too** (issue #52). AVDb needs no API
+/// key, so a user who enabled it and holds no TMDB/TheTVDB key used to be
+/// told to "add an API key" by this very dialog while the adapter sat
+/// registered and configured — the automatic resolver could reach it, the
+/// manual one could not. The adapters are now searched alongside the
+/// built-ins, and they lead the list when the user picked the external
+/// provider in Settings → Metadata, exactly like `providerOrderFor` does for
+/// the automatic path.
 class MetadataSearch {
-  MetadataSearch({TmdApi? tmdb, TheTvdbClient? theTvdb})
-      : _tmdb = tmdb ?? TmdApi(),
-        _theTvdb = theTvdb ?? TheTvdbClient(),
-        _ownsTheTvdb = theTvdb == null;
+  MetadataSearch({
+    TmdApi? tmdb,
+    TheTvdbClient? theTvdb,
+    List<MetadataProviderAdapter>? adapters,
+  }) : _tmdb = tmdb ?? TmdApi(),
+       _theTvdb = theTvdb ?? TheTvdbClient(),
+       _ownsTheTvdb = theTvdb == null,
+       _adapterOverride = adapters;
 
   final TmdApi _tmdb;
   final TheTvdbClient _theTvdb;
   final bool _ownsTheTvdb;
+
+  /// Test seam: when set, these adapters are used instead of the registry's.
+  final List<MetadataProviderAdapter>? _adapterOverride;
 
   /// TMDB is available once any key (build-time or user-entered) resolves.
   Future<bool> get _tmdbConfigured async {
@@ -45,10 +62,36 @@ class MetadataSearch {
     }
   }
 
+  /// Registered adapters that are actually usable, in registration order.
+  ///
+  /// Mirrors `MetadataProviderRegistry.configured()`, but honours the test
+  /// override so a dialog test can supply its own adapter.
+  Future<List<MetadataProviderAdapter>> _configuredAdapters() async {
+    final override = _adapterOverride;
+    if (override == null) {
+      return MetadataProviderRegistry.instance.configured();
+    }
+    final result = <MetadataProviderAdapter>[];
+    for (final adapter in override) {
+      try {
+        if (await adapter.isConfigured()) result.add(adapter);
+      } catch (_) {
+        // A misbehaving adapter must not block the others.
+      }
+    }
+    return result;
+  }
+
   /// True when at least one provider can be searched. When false the dialogs
   /// show the "add an API key" hint rather than an empty result list.
+  ///
+  /// An enabled external adapter counts: AVDb needs no key, so keying this off
+  /// TMDB/TheTVDB alone told a key-less user to go and get a key they did not
+  /// need (issue #52).
   Future<bool> get hasAnyProvider async =>
-      await _tmdbConfigured || await _theTvdbConfigured;
+      await _tmdbConfigured ||
+      await _theTvdbConfigured ||
+      (await _configuredAdapters()).isNotEmpty;
 
   /// Title search across every configured provider.
   ///
@@ -63,22 +106,22 @@ class MetadataSearch {
     if (query.trim().isEmpty) return const [];
     final hasTmdb = await _tmdbConfigured;
     final hasTheTvdb = await _theTvdbConfigured;
-    if (!hasTmdb && !hasTheTvdb) return const [];
+    final adapters = await _configuredAdapters();
+    if (!hasTmdb && !hasTheTvdb && adapters.isEmpty) return const [];
 
-    final primary = await _gather(
-      (p) => _searchOne(p, query, year: year, kind: kind),
+    final targets = _orderedProviders(
+      choice: await _providerChoice(),
       hasTmdb: hasTmdb,
       hasTheTvdb: hasTheTvdb,
+      adapters: adapters,
     );
+
+    final primary = await _gather(targets, query, year: year, kind: kind);
     if (primary.isNotEmpty) return primary;
 
     // Kind-first fallback: the toggle is never just a reorder.
     final otherKind = kind == TmdKind.tv ? TmdKind.movie : TmdKind.tv;
-    return _gather(
-      (p) => _searchOne(p, query, kind: otherKind),
-      hasTmdb: hasTmdb,
-      hasTheTvdb: hasTheTvdb,
-    );
+    return _gather(targets, query, kind: otherKind);
   }
 
   /// Numeric-id lookup. Movie and TV ids live in separate namespaces per
@@ -88,7 +131,8 @@ class MetadataSearch {
     if (id <= 0) return const [];
     final hasTmdb = await _tmdbConfigured;
     final hasTheTvdb = await _theTvdbConfigured;
-    if (!hasTmdb && !hasTheTvdb) return const [];
+    final adapters = await _configuredAdapters();
+    if (!hasTmdb && !hasTheTvdb && adapters.isEmpty) return const [];
 
     final otherKind = kind == TmdKind.tv ? TmdKind.movie : TmdKind.tv;
     final results = <TmdMovie>[];
@@ -109,6 +153,16 @@ class MetadataSearch {
           // Same — keep whatever the other provider returned.
         }
       }
+      // An adapter's own id space is not TMDB's, so the id is handed over as
+      // TEXT and the adapter decides what it means with it — AVDb routes a
+      // numeric term to `ids=` and anything else to a title search.
+      for (final adapter in adapters) {
+        try {
+          results.addAll(await adapter.search('$id', kind: probeKind));
+        } catch (_) {
+          // Same — keep whatever the other provider returned.
+        }
+      }
     }
     return dedupe(results);
   }
@@ -116,6 +170,25 @@ class MetadataSearch {
   /// Season names for a picked series, dispatched on that entry's provider.
   Future<Map<int, String>> seasonNames(TmdMovie movie) async {
     if (movie.kind != TmdKind.tv) return const {};
+    if (movie.provider == MetadataProvider.external) {
+      // An external catalogue has no TMDB seasons to ask for. Asking TMDB for
+      // an AVDb id would have returned a completely unrelated series.
+      for (final adapter in await _configuredAdapters()) {
+        try {
+          final seasons = await adapter.seasons(movie);
+          if (seasons.isNotEmpty) {
+            return {
+              for (final season in seasons)
+                if (season.name.trim().isNotEmpty)
+                  season.seasonNumber: season.name.trim(),
+            };
+          }
+        } catch (_) {
+          // Try the next adapter.
+        }
+      }
+      return const {};
+    }
     final names = movie.provider == MetadataProvider.theTvdb
         ? await _theTvdb.seasonNames(movie)
         : await _tmdb.seasonNames(movie);
@@ -125,31 +198,77 @@ class MetadataSearch {
     };
   }
 
-  Future<List<TmdMovie>> _searchOne(
-    MetadataProvider provider,
+  /// One searcher per usable provider, in the order the results should be
+  /// listed.
+  ///
+  /// The order follows the user's Settings → Metadata choice, so a user who
+  /// picked AVDb sees its hits first (and wins the dedupe tie). The built-ins
+  /// keep their historical TMDB-then-TheTVDB order otherwise.
+  List<_SearchTarget> _orderedProviders({
+    required MetadataProviderChoice choice,
+    required bool hasTmdb,
+    required bool hasTheTvdb,
+    required List<MetadataProviderAdapter> adapters,
+  }) {
+    final targets = <_SearchTarget>[];
+    if (choice == MetadataProviderChoice.external) {
+      // The external provider is PRIMARY here, exactly like it is for the
+      // automatic resolver (`providerOrderFor`).
+      for (final adapter in adapters) {
+        targets.add(_SearchTarget.adapter(adapter));
+      }
+      if (hasTmdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.tmdb));
+      }
+      if (hasTheTvdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.theTvdb));
+      }
+      return targets;
+    }
+    if (choice == MetadataProviderChoice.theTvdb) {
+      if (hasTheTvdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.theTvdb));
+      }
+      if (hasTmdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.tmdb));
+      }
+    } else {
+      if (hasTmdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.tmdb));
+      }
+      if (hasTheTvdb) {
+        targets.add(const _SearchTarget.builtIn(MetadataProvider.theTvdb));
+      }
+    }
+    for (final adapter in adapters) {
+      targets.add(_SearchTarget.adapter(adapter));
+    }
+    return targets;
+  }
+
+  Future<MetadataProviderChoice> _providerChoice() async {
+    try {
+      return await TheTvdbClient.providerChoice();
+    } catch (_) {
+      return MetadataProviderChoice.tmdb;
+    }
+  }
+
+  /// Runs one search across every usable provider in parallel, keeping the
+  /// providers' hits in list order, and collapsing cross-provider duplicates.
+  Future<List<TmdMovie>> _gather(
+    List<_SearchTarget> targets,
     String query, {
     int? year,
     required TmdKind kind,
-  }) =>
-      provider == MetadataProvider.tmdb
-          ? _tmdb.search(query, year: year, kind: kind)
-          : _theTvdb.search(query, year: year, kind: kind);
-
-  /// Runs one search across every configured provider in parallel, keeping
-  /// TMDB's hits ahead of TheTVDB's, and collapsing cross-provider duplicates.
-  Future<List<TmdMovie>> _gather(
-    Future<List<TmdMovie>> Function(MetadataProvider provider) search, {
-    required bool hasTmdb,
-    required bool hasTheTvdb,
   }) async {
-    final futures = <Future<List<TmdMovie>>>[];
-    if (hasTmdb) {
-      futures.add(_guard(() => search(MetadataProvider.tmdb)));
-    }
-    if (hasTheTvdb) {
-      futures.add(_guard(() => search(MetadataProvider.theTvdb)));
-    }
-    final lists = await Future.wait(futures);
+    final lists = await Future.wait(
+      targets.map(
+        (target) => _guard(
+          () => target.search(query, _tmdb, _theTvdb, year: year, kind: kind),
+        ),
+      ),
+    );
     return dedupe(lists.expand((l) => l));
   }
 
@@ -181,12 +300,49 @@ class MetadataSearch {
 
   @visibleForTesting
   static String dedupeKey(TmdMovie m) {
-    final title =
-        m.title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+    final title = m.title
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
     return '${m.kind.name}|$title|${m.year ?? ''}';
   }
 
   void dispose() {
     if (_ownsTheTvdb) _theTvdb.dispose();
+  }
+}
+
+/// A provider the dialog can search, in a form that carries its own call.
+///
+/// The two built-ins need the search's own clients (TMDB's key, TheTVDB's
+/// credentials), while an adapter is self-contained — so the target owns the
+/// dispatch instead of a `switch` over the provider enum, which would have
+/// needed a second case for every adapter that is ever added.
+class _SearchTarget {
+  const _SearchTarget.builtIn(this.builtIn) : adapter = null;
+
+  _SearchTarget.adapter(this.adapter) : builtIn = null;
+
+  /// Which built-in this target is, or null for an adapter.
+  final MetadataProvider? builtIn;
+
+  final MetadataProviderAdapter? adapter;
+
+  Future<List<TmdMovie>> search(
+    String query,
+    TmdApi tmdb,
+    TheTvdbClient theTvdb, {
+    int? year,
+    required TmdKind kind,
+  }) {
+    final external = adapter;
+    if (external != null) {
+      // An adapter has its own catalogue and its own idea of what a year means
+      // (AVDb has no ratings and no year filter), so neither is forwarded.
+      return external.search(query, kind: kind);
+    }
+    return builtIn == MetadataProvider.theTvdb
+        ? theTvdb.search(query, year: year, kind: kind)
+        : tmdb.search(query, year: year, kind: kind);
   }
 }
