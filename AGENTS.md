@@ -2642,6 +2642,39 @@ The home library shows **only folders the user explicitly adds** — nothing is 
   - **It cannot repair existing installs.** Anyone currently on a CI release is signed with a key that exists nowhere. They uninstall **once**, then every future update works.
   - **versionCode was NOT the cause** (issue #43's second theory), but there is a separate trap: `flutter build apk --split-per-abi` applies `abiVersionCode * 1000 + base` (`FlutterPlugin.kt`, `ARCH_ARM64 -> 2`), so published codes are `universal 40` / `arm64-v8a 2040` for v0.5.1. Both increase per release, but because arm64 always beats universal, **a user on the arm64 split APK cannot later install a universal build** — Android reads it as a downgrade. Tell users to pick one flavour and stay on it. Verify with `aapt2 dump badging <apk> | grep versionCode`; the hand-pinned `versionCode` in `build.gradle.kts` is the `base`, not the shipped number.
 
+### Alternative app stores: Obtainium (live) and IzzyOnDroid (blocked on APK size)
+
+- **Obtainium needs no listing or submission.** Users add the GitHub repo and
+  Obtainium installs each release, signature-checked. The README and the website
+  both carry the one-tap add link
+  (`https://apps.obtainium.imranr.dev/redirect?r=…`), which is **double
+  percent-encoded**: the `r` parameter encodes the whole `obtainium://app/…`
+  link, and the JSON inside that link is encoded for the URI path. Breaking
+  either layer fails silently (the redirect page loads, nothing happens), so
+  `test/obtainium_link_test.dart` decodes it back to `{id,url,author,name}` and
+  also asserts the badge PNG is committed. Badge lives at
+  `docs/assets/img/badge-obtainium.png` (trimmed to 322×96, displayed 161×48);
+  the Obtainium wiki asks projects to self-host rather than hotlink
+  `raw.githubusercontent.com`.
+- **IzzyOnDroid is blocked by its documented 30 MB APK cap** ("We cannot
+  currently accept APK files over 30 MB"). Measured v0.5.4 assets: universal
+  **165 MB**, arm64 **71 MB**, x86_64 **60 MB**, armv7 **50 MB**. Dropping the
+  custom `libmpv.so` (29 MB) does not help — `libapp.so` (17 MB),
+  `libflutter.so` (12 MB) and dex (6 MB) are already 35 MB, so a slim flavour
+  would lose the second engine *and* still miss the cap. Do not re-investigate
+  this as a packaging bug.
+- **Fastlane tree** (`fastlane/metadata/android/en-US/`) exists for any
+  storefront that reads it (IzzyOnDroid, F-Droid). Traps: `changelogs/<file>.txt`
+  is named after the **hand-pinned Android `versionCode`** (43), not pubspec's
+  `+N`; the changelog is capped at **500 bytes plain ASCII**; screenshots must
+  be PNG/JPG with a height/width ratio **≤ 2:1** (the 900×1980 device captures
+  are 2.2, so they are padded to 990×1980 with the app background rather than
+  cropped); `featureGraphic.png` must be exactly **1024×500** or 512×250.
+- IzzyOnDroid inclusion requests are a **Codeberg issue form**
+  (`codeberg.org/IzzyOnDroid/repodata/issues`, template
+  `app-inclusion-request.yaml`), not GitLab as older notes said. The form
+  requires build instructions and an honest AI-usage disclosure.
+
 - **App Store metadata is SEPARATE from `CHANGELOG.md` — Guideline 2.3.10 (2026-10-12).** App Review rejected 0.5.1 (36) under "Accurate Metadata": *"The app or metadata includes information about third-party platforms"*, next step *"Revise the app's What's New text to remove Android references."* The cause was copying from `CHANGELOG.md`, which is **Android-first by design** (it feeds GitHub Releases) and contains `Android`, `libmpv`/`MPV`/`Media3`, `SystemCodec`, `HTTP 400`, pixel widths and dB figures. Much of each entry is also **Android-only** (the VobSub OOM is `SubtitleFormats.kt`, the orientation bug is `Activity.setRequestedOrientation`, 4K subtitle scaling is libmpv) so it was noise for an iOS reviewer regardless. **Use `.github/release_notes_ios.md` for App Store Connect What's New**; its header lists the rules (no other platform, no engine names, no internal identifiers, iOS-visible changes only). Do not "fix" this by removing detail from `CHANGELOG.md` — GitHub Releases need it.
   - **Fast path when this happens**: Apple's message says the issue is *"eligible to be resolved on your next update"* and *"If this submission includes bug fixes […] reply to this message and let us know. You do not need to resubmit."* Since each release is mostly bug fixes, reply with the corrected text and request approval rather than rebuilding.
 - **The app website URL is CASE-SENSITIVE — do not "helpfully" lowercase it.** The site is `https://mangeshghodke.github.io/DreamPlayer/`, served from `main:/docs` of this repo, so the Pages path *is* the repository name and GitHub matches it case-sensitively. Measured live: `/DreamPlayer/` → 200, `/DreamPlayer` → 301 (GitHub adds the slash), `/dreamplayer/` → **404**, `/Dreamplayer/` → **404**. This is the opposite of the REPO url, which GitHub resolves case-insensitively (`github.com/mangeshghodke/dreamplayer` works), so a Pages link can look right in the repo view and still 404 — a silent failure, and the Terms/Privacy links are App Review critical. The casing is pinned **by convention, not fixed**: renaming the repo would only flip which casing works and would break the README, the in-app legal links, the App Review reply and the App Store listing. `test/website_links_test.dart` scans `lib/`, `docs/`, `.github` and the root markdown and fails on any other casing. Note the two things it must NOT flag, both of which really occur: the shields.io badge whose hostname merely contains the string (`img.shields.io/badge/Website-mangeshghodke.github.io-2D8CF0`), and the same URL as bare link *text*. Both `/terms` and `/terms.html` resolve (Pages serves the `.html` file for the extensionless path), so the app spells the legal links without the extension while `review_reply.md` uses it — both are fine.

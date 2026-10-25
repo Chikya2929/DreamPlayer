@@ -1,0 +1,11 @@
+0.5.4
+
+New: library search from Home (offline, accent-insensitive), player
+keyboard shortcuts, and an AirPlay route picker on iOS.
+
+Improved: episode rows share one responsive widget with a Small / Medium /
+Large thumbnail setting, per-episode artwork loads lazily and is prefetched,
+and pull-to-refresh now rescans local library folders so new files appear.
+
+Fixed: the fullscreen button did nothing when rotation was locked, SMB share
+refreshing failed on iOS, plus chapter and resume fixes.

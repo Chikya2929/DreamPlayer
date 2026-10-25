@@ -1,0 +1,31 @@
+DreamPlayer plays your own video files the way they were encoded. Dolby Vision, HDR10 and HDR10+ reach the display instead of being flattened to SDR, and DTS-HD, TrueHD, E-AC3 and multichannel FLAC are decoded properly.
+
+**HDR that stays HDR**
+
+Video is rendered into a real hardware video surface, so Dolby Vision (profiles 7, 8 and 9, plus profile 4 on supported hardware), HDR10, HDR10+ and HLG arrive at the panel as PQ/BT.2020. The player shows what the file actually contains — HDR format, video and audio codec, resolution, decoder in use — so a mislabelled download is obvious.
+
+**Every source, built in**
+
+* Local storage, SD cards and USB drives
+* SMB/NAS (SMB2/3) browsed and played in-app, no second app needed
+* WebDAV, FTP/SFTP, Jellyfin/Emby and DLNA/UPnP
+* "Open with" from any file manager or file explorer
+* Download to device for offline playback
+
+**Audio**
+
+DTS, DTS-HD, TrueHD/Atmos, E-AC3, AC3, FLAC and everything the platform can decode, with the container's default track selected on open and your last pick remembered per video. On Android TV, HDMI bitstream passthrough sends Atmos and DTS-HD untouched to an eARC soundbar or receiver. Volume boost, night mode and bass boost are available on Android.
+
+**Subtitles**
+
+Embedded and sidecar SRT, ASS/SSA, WebVTT, TTML, SAMI, MicroDVD, MPL2 and SubViewer tracks, plus PGS and DVB bitmaps. Sidecar files next to the video are attached automatically, the best match is selected, and you can adjust size, font, colour, background, outline, position and delay. Optional OpenSubtitles search downloads missing subtitles in-app.
+
+**Library and player**
+
+Poster cards and episode artwork come from TMDB (TheTVDB is optional), with continue watching, resume positions, watched marks, manual groups and offline library search. The player covers picture-in-picture, background playback with lock-screen and headset controls, sleep timer, A/B repeat, repeat and shuffle, playback speed, chapter navigation, aspect-ratio modes, brightness and volume gestures, and a hardware-keyboard friendly remote layout.
+
+**Private by design**
+
+No ads, no account, no analytics and no advertising SDK. Your library, history and metadata stay on your device. Online artwork and episode info come from TMDB, which requires a free API key; the app explains this on first run, and browsing and playback work without one.
+
+Android and Android TV builds are free. GPLv3 licensed; the source is at github.com/mangeshghodke/DreamPlayer and the project site is at mangeshghodke.github.io/DreamPlayer.
