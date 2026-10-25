@@ -3,6 +3,34 @@
 All notable changes to DreamPlayer are documented here. Each release's entry is
 pulled into the GitHub Release body automatically by `.github/workflows/release.yml`.
 
+## Unreleased
+
+### Added
+
+- **r18.dev as a metadata provider (issue #52).** No API key needed. It is
+  keyed by the catalogue code in the file name — `SVFLA-012` and `SVFLA012`
+  both resolve — and brings the poster, the cast, the release date, the
+  studio, the genres and the sample-video frames. Enable it in
+  Settings → Metadata.
+
+### Fixed
+
+- **Get info / Fix match / Group poster never searched the external
+  providers (issue #52).** Those dialogs only knew TMDB and TheTVDB, so a
+  user with AVDb enabled and no TMDB or TheTVDB key was told to add an API
+  key by the very dialog that could have used the key-less provider. The
+  registered adapters are searched alongside the built-ins now, and they lead
+  when the external provider is the one selected in Settings → Metadata.
+- **Picking an external match loaded an unrelated film.** An external id was
+  handed to TMDB, which answered with a completely unrelated movie, and its
+  poster and synopsis were written over the adapter's match. The details are
+  now fetched from the provider that matched.
+- **AVDb missed codes without their separator.** `wd=` matches literally, so
+  `SVFLA012` found nothing while `SVFLA-012` did; the separator-less form is
+  retried with the hyphen. The HTML entities AVDb leaves in its text fields
+  are decoded too, so an original title is no longer shown with raw entities
+  in it.
+
 ## 0.5.4
 
 ### Added

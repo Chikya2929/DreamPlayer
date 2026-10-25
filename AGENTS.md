@@ -114,7 +114,53 @@ A video player app supporting:
     while the registry held its own, so toggling wrote the preference but the
     registered adapter reported the old value for the rest of the session — the
     provider stayed invisible. `test/avdb_adapter_test.dart` reproduces that.
-- **Episode rows fall back to the show poster when there is no still (issue
+  - **r18.dev (`lib/services/r18dev_adapter.dart`, issue #52, 2026-10-25)** —
+    verified live before writing, and it is a DIFFERENT shape from AVDb:
+    **there is no free-text search at all — the catalogue is keyed by CODE.**
+    `GET https://r18.dev/videos/vod/movies/detail/-/dvd_id=<code>/json` is the
+    lookup (the site strips spaces and quotes from what you type, so
+    `SVFLA-012` and `SVFLA012` are the same record; `SVFLA 012` 404s), and
+    `GET .../combined=<content_id>/json` is the full record. It answers a
+    plain Dart `HttpClient` request — no Cloudflare challenge, no key, no
+    cookie. **`content_id` is a STRING** ("1svfla012"), which is why
+    `TmdMovie.providerId` exists: the integer `id` is only a stable FNV-1a
+    hash of it, and the cache key is provider-qualified on the REAL id.
+    The full record carries `jacket_full_url` (the poster), `gallery[]` (the
+    sample-video frames → `TmdDetails.stills`), `actresses`/`actors`/
+    `directors` with `name_romaji`/`name_kanji`/`name_kana`, `categories[]`
+    with `name_en`/`name_ja` (the genres — but **"Sample Video" and
+    "Over 4 Hours" are site markers, not genres**), `maker_name_*`/`label_name_*`
+    (the studio — it goes in the tagline, because `TmdDetails` has no studio
+    field), `release_date` and `runtime_mins`. `maker_name_en` is usually
+    **null** and only the Japanese name is populated; `title_en` is a machine
+    translation (`title_en_is_machine_translation: true`) and
+    `title_en_uncensored` is null. `comment_en` is null too, so the synopsis
+    is empty. `jav.guru` was probed as an alternative: 301/404, so it would
+    need scraping — do not go there.
+  - **Two adapters, one "External" provider cell (issue #52).** `main()`
+    registers **r18.dev FIRST, then AVDb**, and the consultation order is
+    registration order — so a JAV file resolves on r18.dev (code → rich
+    record) before AVDb (name → thin record). Both are behind the SAME
+    Settings → Metadata → External cell, and each has its own on/off switch
+    there. `MetadataProviderChoice.external` stays PRIMARY, not a fallback:
+    the order is `[external, tmdb, theTvdb?]`, and `providerOrderFor` falls
+    back to the built-ins when no adapter is configured.
+  - **The manual dialogs must search the adapters too (issue #52).**
+    `MetadataSearch` used to know only TMDB and TheTVDB, so a key-less user
+    with AVDb enabled was told to "add an API key" BY the Get info dialog
+    that could have used the provider. It now searches the registered
+    adapters alongside the built-ins, and `hasAnyProvider` counts an enabled
+    adapter. **`TmdService.detailsFor`/`detailsForMovie` must dispatch on the
+    movie's provider** — an external id handed to TMDB returns an unrelated
+    film, and that film's poster and synopsis were written over the adapter's
+    match (a silent data corruption). Same for the season-name lookups.
+  - **AVDb's `wd=` is a LITERAL match (issue #52).** Measured live:
+    `wd=SVFLA-012` → 2 hits, `wd=SVFLA 012` → 2 hits, `wd=SVFLA012` → **0
+    hits**. The separator-less spelling is what a file name often carries,
+    so `AvdbAdapter.queryVariants` retries it with the hyphen. AVDb also
+    leaves HTML entities in its text fields (`origin_name` came back as
+    `... &#039; ...`), decoded by `unescapeHtml`.
+  - **Episode rows fall back to the show poster when there is no still (issue
   #47, 2026-10-11)**: `EpisodeStillThumb` already fell back to `posterUrl`, but
   **`folder_screen`, `series_seasons_screen` and `smb_screen` never passed one**,
   so a row with no still rendered a bare icon — which reads as "the thumbnail
@@ -2692,7 +2738,8 @@ lib/
   services/jellyfin_client.dart     # Jellyfin/Emby REST + mDNS discovery + JellyfinServer/JellyfinItem/JellyfinItemInfo models + videoItem/serverForUrl/getItemInfo helpers + folder-meta cache + VideoChapter from Item.Chapters
   services/adult_content_store.dart  # include_adult toggle (issue #46), persisted, default off
   services/metadata_provider_adapter.dart # MetadataProviderAdapter + registry: pluggable 3rd providers
-  services/avdb_adapter.dart          # AVDb (avdbapi.com) as the first adapter; no key, movie-only
+  services/avdb_adapter.dart          # AVDb (avdbapi.com) adapter; no key, movie-only, name search
+  services/r18dev_adapter.dart        # r18.dev adapter; no key, movie-only, keyed by catalogue code
   services/tmdb_client.dart        # TMDB: filename parser (ParsedFileName), TmdApi (search/details/bestForQuery), TmdStore cache, TmdService facade
   services/the_tvdb_client.dart    # optional TheTVDB v4 client, provider mapping, pagination, and secure credential channel
   services/library_folders.dart    # user-added library folders (LibraryFolder model + LibraryFoldersStore, prefs dreamplayer.libraryFolders; LibraryFolderSource.files|jellyfin|smb|webdav|ftp|upnp)
@@ -2799,6 +2846,9 @@ test/
   chapter_nav_test.dart           # issue #40 chapter jump: grace window, null-at-end (no wrap), duplicate starts
   app_debug_log_test.dart         # Dart-side log is inert under flutter_test and never throws
   avdb_adapter_test.dart             # AVDb maps the Maccms shape; duration vs date; singleton staleness
+  r18dev_adapter_test.dart           # r18.dev: code recognition, stable ids, search/details/registry
+  metadata_search_external_test.dart # the Get info dialog searches the registered adapters
+  metadata_external_details_test.dart # an external match is never fetched from TMDB
   metadata_adult_and_external_test.dart # include_adult wire param; external provider ordering; registry
   file_browser_selection_test.dart   # long-press select -> three dots -> delete, folder warning, download
   settings_metadata_provider_layout_test.dart # three equal cells never clip (411dp = reporter's width)
