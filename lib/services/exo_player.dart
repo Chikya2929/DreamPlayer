@@ -365,7 +365,7 @@ class ExoPlayerEvent {
   /// Bass boost level 0–3 (off/low/medium/high) from the native BassBoost.
   final int bassBoost;
 
-  /// Volume boost factor (1.0–3.0) from the native LoudnessEnhancer.
+  /// Volume boost factor (1.0–3.0) from the native PCM gain+limiter.
   final double audioBoost;
 
   /// Night Mode flag (compressed dynamic range).
@@ -525,7 +525,7 @@ abstract class PlaybackController {
   /// Returns the current system media volume normalised to 0.0–1.0.
   Future<double> getSystemVolume();
 
-  /// Volume boost factor (1.0 = unity, 3.0 = ~+1500 mB via LoudnessEnhancer).
+  /// Volume boost factor (1.0 = unity, 3.0 = +12 dB, peak-limited).
   Future<void> setAudioBoost(double boost);
 
   /// Night Mode — dynamic range compression / loudness normalisation.

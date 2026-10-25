@@ -11,8 +11,6 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.graphics.Color
 import android.graphics.Typeface
-import android.media.audiofx.DynamicsProcessing
-import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -122,11 +120,29 @@ class ExoPlayerView(
     private val mediaCodecSelector: MediaCodecSelector =
         PlayerCodecs.mediaCodecSelector(activity)
 
-    // ---- Volume Boost + Night Mode (LoudnessEnhancer on AudioTrack session) ----
-    private var loudnessEnhancer: LoudnessEnhancer? = null
-    /// Preferred boost path (#41). A real compressor+limiter; see
-    /// DynamicsBoost. Falls back to [loudnessEnhancer] when unavailable.
-    private var boostChain: DynamicsBoost.Chain? = null
+    // ---- Volume Boost + Night Mode ------------------------------------------
+    /// Boost goes through PCM gain + peak limiter inside the audio sink, on
+    /// whatever channel layout the decoder produced (issue #41).
+    ///
+    /// The platform alternative, `DynamicsProcessing`, was tried first and is
+    /// still the "supported" API, but it is a VENDOR HAL effect and therefore
+    /// behaves differently per device: this phone creates it, the reporter's
+    /// OnePlus Pad 2 refuses to create it at all (`setEngineArchitecture()` ->
+    /// "AudioEffect: bad parameter value"). The old fallback on that failure was
+    /// `LoudnessEnhancer`, whose AOSP implementation is hard-wired for STEREO;
+    /// attached to a 5.1 session it mangled the centre channel, which is the
+    /// dialogue — exactly the reported symptom ("music continues, vocals
+    /// disappear"). The reporter also confirmed that MPV, which applies plain
+    /// gain and no effect chain, now sounds correct on the same speakers.
+    ///
+    /// So Media3 does the same thing MPV does: gain the decoded PCM, then limit
+    /// peaks. One code path, identical on every device, and channel-agnostic.
+    /// It cannot drop a channel because it never looks at the layout.
+    ///
+    /// Bitstream passthrough (HDMI/AVR) is unaffected: the sink only runs audio
+    /// processors on PCM, so an encoded stream bypasses this exactly as it
+    /// bypassed the old effect.
+    private val boostProcessor get() = DreamRenderersFactory.audioBoostProcessor
     /// Volume boost is SESSION state, never restored.
     ///
     /// It used to be seeded from `flutter.dreamplayer.audioBoost`, which this
@@ -136,6 +152,9 @@ class ExoPlayerView(
     /// unity here also means the stale pref can no longer cause a briefly
     /// boosted first frame before Dart pushes 1.0 down.
     private var audioBoost: Float = 1.0f
+    /// Last boost (dB) written to the log, so the line appears once per real
+    /// change instead of once per gesture frame.
+    private var boostLoggedDb: Float = 0f
     private var nightModeEnabled: Boolean = run {
         val p = activity.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         p.getBoolean("flutter.dreamplayer.nightMode", false)
@@ -271,29 +290,28 @@ class ExoPlayerView(
     }
 
     /**
-     * Move the make-up gain on the live chain instead of rebuilding it.
+     * Push the current boost to the PCM processor.
      *
-     * Returns false when there is no usable chain, or when the in-place write
-     * fails, so the caller falls back to [applyAudioEffects]. Bass boost and the
-     * loudness fallback are deliberately left alone: they do not depend on the
-     * boost value and rebuilding them per gesture frame would be pure cost.
+     * Called at gesture rate, so it must stay a parameter write — the sink is
+     * configured once per stream and nothing is rebuilt. The processor only
+     * looks at samples, never at the channel layout, which is what makes it
+     * safe for 5.1/7.1 (issue #41: the stereo-only `LoudnessEnhancer` used to
+     * eat the centre channel).
      */
-    private fun updateBoostInPlace(): Boolean {
-        val chain = boostChain ?: return false
-        if (audioBoost <= 1.0f && !nightModeEnabled) return false
-        if (!chain.setBoostDb(currentBoostDb())) {
-            chain.release()
-            boostChain = null
-            return false
+    private fun applyBoostGain() {
+        val db = currentBoostDb()
+        boostProcessor.setBoostDb(db)
+        if (db != boostLoggedDb) {
+            boostLoggedDb = db
+            Log.i(
+                "ExoPlayerView",
+                if (db <= 0.01f) "volume boost off"
+                else "volume boost via PCM gain+limiter at ${db}dB"
+            )
         }
-        return true
     }
 
     private fun applyAudioEffects() {
-        boostChain?.release()
-        boostChain = null
-        try { loudnessEnhancer?.release() } catch (_: Exception) {}
-        loudnessEnhancer = null
         try { bassBoostFx?.release() } catch (_: Exception) {}
         bassBoostFx = null
         val sessionId = player.audioSessionId
@@ -310,47 +328,7 @@ class ExoPlayerView(
                 Log.w("ExoPlayerView", "BassBoost failed", e)
             }
         }
-        if (audioBoost <= 1.0f && !nightModeEnabled) return
-        if (!sessionOk) return
-        // Boost in dB. Capped at +12 dB: the limiter makes higher values
-        // denser rather than louder, and past this point a movie mix has no
-        // headroom left to give.
-        val cappedDb = currentBoostDb()
-
-        // Preferred path: real compressor + limiter (issue #41 — the old
-        // LoudnessEnhancer path clipped audibly well below this gain and
-        // crushed dialogue out of the mix).
-        if (DynamicsBoost.supported) {
-            val channels = player.audioFormat?.channelCount ?: 2
-            val attached = DynamicsBoost.attach(sessionId, cappedDb, channels)
-            if (attached != null) {
-                boostChain = attached
-                return
-            }
-            // Fell through deliberately: fall back rather than silently
-            // giving the user no boost at all.
-        }
-
-        // Fallback: API < 28, or a vendor whose HAL refused every
-        // DynamicsProcessing config. This is the old, known-clipping behaviour
-        // and it is what crushes dialogue out of the mix, so it must never be
-        // silent: a OnePlus Pad 2 failed every attempt in 0.5.2 and the only
-        // clue was one Log.w buried in a logcat (issue #41). Warn loudly, and
-        // say what to look for.
-        try {
-            val enhancer = LoudnessEnhancer(sessionId)
-            enhancer.setTargetGain((cappedDb * 100).toInt().coerceIn(0, 1500))
-            enhancer.enabled = true
-            loudnessEnhancer = enhancer
-            Log.w(
-                "ExoPlayerView",
-                "FALLING BACK to LoudnessEnhancer at ${cappedDb}dB -- dialogue may " +
-                    "vanish above 100% boost on speakers. Expected 'attached boost=' " +
-                    "from DynamicsBoost. See issue #41."
-            )
-        } catch (e: Exception) {
-            Log.w("ExoPlayerView", "LoudnessEnhancer failed", e)
-        }
+        applyBoostGain()
     }
 
     /// Base source for non-file/content schemes. `DefaultDataSource` handles
@@ -1737,14 +1715,13 @@ class ExoPlayerView(
                     val boost = call.argument<Number>("boost")?.toFloat() ?: 1.0f
                     audioBoost = boost.coerceIn(1.0f, 2.0f)
                     // Gesture-rate path: the volume gesture pushes a new value
-                    // on every frame it changes, so a full rebuild here would
-                    // release and re-attach the whole effect chain dozens of
-                    // times per second. That restarts the compressor's envelope
-                    // follower each time, so gain reduction never accumulates and
-                    // the chain only ever acts in the gaps between rebuilds --
-                    // audible as the boost behaving differently the moment you
-                    // lift your finger (issue #41). Move the gain instead.
-                    if (!updateBoostInPlace()) applyAudioEffects()
+                    // on every frame it changes. The gain is a parameter write
+                    // on the sink processor, so nothing is rebuilt and the
+                    // limiter's envelope keeps running across the drag (issue
+                    // #41: rebuilding the chain per frame reset the envelope,
+                    // which is why dialogue returned while dragging and
+                    // vanished after release).
+                    applyBoostGain()
                     emit()
                     result.success(null)
                 }
@@ -2739,10 +2716,8 @@ class ExoPlayerView(
         stopPositionTicker()
         unregisterSpatialListener()
         PlaybackManager.release(activity)
-        boostChain?.release()
-        boostChain = null
-        try { loudnessEnhancer?.release() } catch (_: Exception) {}
-        loudnessEnhancer = null
+        DreamRenderersFactory.audioBoostProcessor.setBoostDb(0f)
+        boostLoggedDb = 0f
         try { bassBoostFx?.release() } catch (_: Exception) {}
         bassBoostFx = null
         player.removeListener(listener)

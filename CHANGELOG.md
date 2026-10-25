@@ -15,6 +15,13 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Fixed
 
+- **Volume boost no longer loses the dialogue on 5.1/7.1 tracks (issue #41).**
+  Above 100% boost on some devices the background music kept playing while
+  voices disappeared. The boost used a platform audio effect, and the fallback
+  effect (`LoudnessEnhancer`) is hard-wired for stereo, so on a six-channel
+  track it mangled the centre channel — where dialogue lives. Boost is now
+  applied to the decoded audio itself, with a peak limiter, so it works the
+  same on every channel layout and every device.
 - **Get info / Fix match / Group poster never searched the external
   providers (issue #52).** Those dialogs only knew TMDB and TheTVDB, so a
   user with AVDb enabled and no TMDB or TheTVDB key was told to add an API

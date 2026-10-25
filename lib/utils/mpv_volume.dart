@@ -11,9 +11,12 @@
 //
 // ## Why the boost is staged differently per engine
 //
-// Media3 has a real effect chain, so `DynamicsBoost` applies a compressor
-// followed by a limiter (#41: `LoudnessEnhancer` clipped audibly from ~6 dB
-// and crushed dialogue out of the mix).
+// Media3 applies the gain to the decoded PCM inside the audio sink, followed
+// by a peak limiter (`BoostLimiterProcessor`, issue #41). It used to attach
+// `LoudnessEnhancer`/`DynamicsProcessing` effects instead; `LoudnessEnhancer` is
+// hard-wired for STEREO in AOSP and dropped the centre channel of a 5.1 mix
+// (the dialogue), and `DynamicsProcessing` is a vendor HAL effect that the
+// reporter's OnePlus Pad 2 cannot create at all.
 //
 // MPV has no comparable hardware effect. Its gain therefore rides on mpv's own
 // `volume` property, which is the one placement known to actually reach the
@@ -79,10 +82,11 @@ double mpvVolumePercent({
 ///
 /// So MPV's boost rides on `volume` alone (see [mpvVolumePercent]) and will
 /// CLIP at high settings rather than limit. That is a known, accepted limit,
-/// not an oversight. The engine that gets a proper compressor + limiter is the
-/// native one, via `DynamicsBoost` (API 28+), which is where boost is used by
-/// default. Adding a limiter to MPV would need a different filter-delivery
-/// mechanism — a Lua script or a custom libmpv — not another `af` string.
+/// not an oversight. The engine that gets a proper peak limiter is the native
+/// one, via `BoostLimiterProcessor` in the audio sink, which is where boost is
+/// used by default. Adding a limiter to MPV would need a different
+/// filter-delivery mechanism — a Lua script or a custom libmpv — not another
+/// `af` string.
 /// Do not add an `af` write to `_applyMpvVolume` without re-running the probe
 /// in that file first.
 

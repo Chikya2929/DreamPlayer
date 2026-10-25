@@ -23,10 +23,17 @@ class DreamRenderersFactory(context: Context) : DefaultRenderersFactory(context)
         /// Manual A/V sync: shifts audio relative to video (±5 s). Shared so
         /// the `setAudioDelay` channel handler can retune it mid-playback.
         val audioDelayProcessor = AudioDelayProcessor()
+
+        /// Volume boost: make-up gain + peak limiter on the decoded PCM. Shared
+        /// so the player can move the gain at gesture rate without rebuilding
+        /// the sink, and because it is the ONLY boost path — no vendor audio
+        /// effect is involved (issue #41).
+        val audioBoostProcessor = BoostLimiterProcessor()
     }
 
-    /// Inserts the audio-delay processor into every audio sink (platform and
-    /// FFmpeg renderers both receive this sink from buildAudioRenderers).
+    /// Inserts the audio-delay and audio-boost processors into every audio
+    /// sink (platform and FFmpeg renderers both receive this sink from
+    /// buildAudioRenderers).
     override fun buildAudioSink(
         context: Context,
         enableFloatOutput: Boolean,
@@ -35,7 +42,7 @@ class DreamRenderersFactory(context: Context) : DefaultRenderersFactory(context)
         DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            .setAudioProcessors(arrayOf(audioDelayProcessor))
+            .setAudioProcessors(arrayOf(audioDelayProcessor, audioBoostProcessor))
             .build()
 
     override fun buildVideoRenderers(

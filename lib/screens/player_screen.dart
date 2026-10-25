@@ -3041,13 +3041,13 @@ Future<void> _offerVc1Mpv() async {
   }
 
   /// Applies the persisted volume-boost / night-mode combination to the mpv
-  /// engine's own volume mixer (the native Media3 LoudnessEnhancer path only
-  /// exists in the main engine; mpv's volume property is the nearest proxy).
+  /// engine's own volume mixer (the native Media3 boost path only exists in the
+  /// main engine; mpv's volume property is the nearest proxy).
   /// Applies the user's Volume Boost / Night Mode to whichever engine is live.
   ///
-  /// Media3 gets a real `LoudnessEnhancer` on the AudioTrack session
-  /// (1.0-3.0x mapped to 0-1500mB). mpv only has its software `volume`, so
-  /// this is the equivalent — and it has to be pushed on EVERY open, not just
+  /// Media3 gets make-up gain + a peak limiter on the decoded PCM in the audio
+  /// sink (capped at +12 dB). mpv only has its software `volume`, so this is
+  /// the equivalent — and it has to be pushed on EVERY open, not just
   /// when the slider moves. Two ways it made MPV quieter than Media3 (issue
   /// #41), both invisible to the user because the device volume never changes:
   ///
