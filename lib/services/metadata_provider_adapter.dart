@@ -129,6 +129,47 @@ abstract class MetadataProviderAdapter {
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .trim();
+
+  /// The catalogue code in a file name, e.g. `SVFLA-012` or `MIAA-818`.
+  ///
+  /// The JAV catalogues (AVDb, r18.dev) are keyed by a studio code, and the
+  /// file name is the only place that code appears — so a provider can only
+  /// resolve such a file if it sees the ORIGINAL name.
+  ///
+  /// The parsed title cannot be used: the filename parser treats a trailing
+  /// number as a movie-part suffix, so `SVFLA-012.mkv` parses to the title
+  /// `SVFLA` and the code is gone. That is why the raw name rides along on
+  /// [ParsedFileName.rawName].
+  ///
+  /// The code is matched anywhere in the name (a studio prefix in brackets is
+  /// common: `[FLAVORY] SVFLA-012.mkv`), but a resolution-like number is
+  /// rejected, so `HEVC-1080p` is not mistaken for a code.
+  static String? catalogueCodeIn(String name) {
+    // Strip a trailing extension so the code's last digit is not followed by
+    // a dot-letter sequence.
+    var cleaned = name.trim();
+    final dot = cleaned.lastIndexOf('.');
+    if (dot > 0 && cleaned.substring(dot + 1).length <= 4) {
+      cleaned = cleaned.substring(0, dot);
+    }
+    // Bracketed groups hold the studio, not the code.
+    cleaned = cleaned.replaceAll(RegExp(r'[\[\(\{][^\]\)\}]*[\]\)\}]'), ' ');
+    final match = RegExp(
+      r'(?<![A-Za-z0-9])([A-Za-z]{2,6})[-_ ]?(\d{2,5})(?![A-Za-z0-9])',
+    ).firstMatch(cleaned);
+    if (match == null) return null;
+    final digits = match.group(2)!;
+    // A resolution is not a catalogue number.
+    if (const {'480', '720', '1080', '1440', '2160', '4320'}.contains(digits)) {
+      return null;
+    }
+    // Neither is a year: `The Matrix 1999` is a title, not a code.
+    if (digits.length == 4) {
+      final asYear = int.tryParse(digits);
+      if (asYear != null && asYear >= 1900 && asYear <= 2099) return null;
+    }
+    return '${match.group(1)!.toUpperCase()}-$digits';
+  }
 }
 
 /// Registry of [MetadataProviderAdapter] implementations.

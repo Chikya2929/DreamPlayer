@@ -106,7 +106,9 @@ class R18DevAdapter extends MetadataProviderAdapter {
   }) async {
     if (!await isConfigured()) return const [];
     if (kind != TmdKind.movie) return const [];
-    final code = codeFromQuery(query);
+    // The typed query may be the bare code, or a whole file name that
+    // contains it.
+    final code = codeFromQuery(query) ?? MetadataProviderAdapter.catalogueCodeIn(query);
     if (code == null) return const [];
     final record = await _lookupCode(code);
     if (record == null) return const [];
@@ -137,14 +139,10 @@ class R18DevAdapter extends MetadataProviderAdapter {
   @override
   Future<TmdMatch?> bestMatch(ParsedFileName parsed) async {
     if (!await isConfigured()) return null;
-    final series = parsed.seriesName ?? '';
-    // The whole name may BE the code ("SVFLA-012"), or the code may lead a
-    // longer file name ("SVFLA-012 Some Title 1080p"). Both are common.
-    final code =
-        codeFromQuery(parsed.title) ??
-        codeFromQuery(series) ??
-        codeFromTitle(parsed.title) ??
-        codeFromTitle(series);
+    // The code has to come from the ORIGINAL name: the parsed title drops it
+    // (`SVFLA-012.mkv` parses to "SVFLA"). See
+    // [MetadataProviderAdapter.catalogueCodeIn].
+    final code = MetadataProviderAdapter.catalogueCodeIn(parsed.rawName ?? parsed.title);
     if (code == null) return null;
     final record = await _lookupCode(code);
     if (record == null) return null;

@@ -817,6 +817,7 @@ class ParsedFileName {
     /// the live-action adaptation over the animated version. Defaults to
     /// `false` (no preference).
     this.liveAction = false,
+    this.rawName,
   });
 
   final String title;
@@ -840,6 +841,15 @@ class ParsedFileName {
     }
     return 1;
   }
+
+  /// The name this was parsed FROM, before any cleanup.
+  ///
+  /// Needed because the parsed [title] cannot carry a catalogue code: the
+  /// filename parser treats a trailing number as a movie-part suffix, so
+  /// `SVFLA-012.mkv` parses to the title "SVFLA" and the code is gone. A
+  /// JAV catalogue is keyed by that code, so an adapter has to be able to
+  /// see the original name (issue #52).
+  final String? rawName;
 
   /// True when the parsed name contained an explicit "Live Action" / "Drama"
   /// keyword. Used by the TMDB match scorer to disambiguate
@@ -970,7 +980,9 @@ class ParsedFileName {
   ];
 
   static ParsedFileName parse(String fileName, {String? parentFolderName}) {
-    var name = fileName.trim();
+    // Kept for the adapters: the parsed title loses a catalogue code.
+    final rawName = fileName.trim();
+    var name = rawName;
     final dot = name.lastIndexOf('.');
     if (dot > 0) {
       final ext = name.substring(dot + 1).toLowerCase();
@@ -1191,6 +1203,7 @@ final yearMatch = _yearPattern.firstMatch(name);
       episode: episode,
       hasExplicitSeason: hasExplicitSeason,
       liveAction: liveAction,
+      rawName: rawName,
     );
   }
 
@@ -2796,6 +2809,89 @@ Future<TmdMatch?> _externalBestMatch(ParsedFileName parsed) async {
   return null;
 }
 
+/// Resolve a folder through the external adapters using the catalogue codes in
+/// its FILE names (issue #52).
+///
+/// A JAV folder is usually named after its contents ("JAVTest", "Movies"), so
+/// the folder name carries nothing a catalogue can match — but the video
+/// inside it does ("SVFLA-012.mkv"). The parsed file name loses the code (the
+/// filename parser strips a trailing number as a movie-part suffix), so the
+/// RAW file names are used here.
+///
+/// Only consulted when the external provider is the primary one: with TMDB as
+/// the resolver, TMDB keeps its historical priority.
+Future<TmdMatch?> _externalBestForFileNames(List<String>? fileNames) async {
+  if (fileNames == null || fileNames.isEmpty) return null;
+  if (await TheTvdbClient.providerChoice() !=
+      MetadataProviderChoice.external) {
+    return null;
+  }
+  final adapters = await MetadataProviderRegistry.instance.configured();
+  if (adapters.isEmpty) return null;
+  // Only a folder that holds ONE video can be resolved from its file name:
+  // with several films in it, the card stands for all of them and any single
+  // poster would be a guess.
+  final videos = fileNames.where(_looksLikeVideoFile).toList();
+  if (videos.length != 1) return null;
+  for (final fileName in videos) {
+    final code = MetadataProviderAdapter.catalogueCodeIn(fileName);
+    if (code == null) continue;
+    for (final adapter in adapters) {
+      try {
+        final hits = await adapter.search(code, kind: TmdKind.movie);
+        for (final hit in hits) {
+          if (!_movieCarriesCode(hit, code)) continue;
+          final fetched = await adapter.details(hit);
+          return TmdMatch(
+            TmdMovie(
+              id: hit.id,
+              title: hit.title,
+              year: hit.year,
+              posterPath: fetched?.posterPath ?? hit.posterPath,
+              overview: fetched?.overview ?? hit.overview,
+              kind: TmdKind.movie,
+              provider: hit.provider,
+              originalTitle: hit.originalTitle,
+              alternateTitles: hit.alternateTitles,
+              providerId: hit.providerId,
+            ),
+            1.0,
+          );
+        }
+      } catch (_) {
+        // Try the next adapter.
+      }
+    }
+  }
+  return null;
+}
+
+/// Quick check: does the name look like a video file?
+///
+/// The folder listing carries subfolders and sidecar files too, and only a
+/// video can carry a catalogue code.
+bool _looksLikeVideoFile(String name) {
+  final lower = name.toLowerCase();
+  const extensions = [
+    '.mkv', '.mp4', '.avi', '.webm', '.mov', '.ts', '.m2ts', '.wmv',
+    '.flv', '.ogv', '.rmvb', '.mpg', '.mpeg', '.vob', '.m4v', '.3gp',
+  ];
+  return extensions.any(lower.endsWith);
+}
+
+/// True when the record's own code matches [code].
+///
+/// The catalogue keeps the code in a different field per provider (AVDb:
+/// `movie_code`, r18.dev: `dvd_id`), and both adapters carry it in the
+/// alternate titles, so that is what is compared.
+bool _movieCarriesCode(TmdMovie movie, String code) {
+  final wanted = code.toUpperCase().replaceAll('_', '-');
+  for (final title in movie.alternateTitles) {
+    if (title.trim().toUpperCase().replaceAll('_', '-') == wanted) return true;
+  }
+  return false;
+}
+
 /// Resolve a free-text query (a folder or season name) through the adapters.
 ///
 /// `preferMovie` and the sequel/part patterns are TMDB-specific and have no
@@ -3454,6 +3550,7 @@ static int? _trailingPartNumber(String folderName) {
         folderName: folderName,
         hasMovieSequelPattern: hasMovieSequelPattern,
         desiredPart: desiredPart,
+        fileNames: fileNames,
     );
     _pending[metadataKey] = future;
     try {
@@ -3540,7 +3637,18 @@ static int? _trailingPartNumber(String folderName) {
     String? folderName,
     bool hasMovieSequelPattern = false,
     int? desiredPart,
+    List<String>? fileNames,
   }) async {
+    // A folder whose name is not a catalogue code but whose VIDEO is
+    // ("JAVTest/SVFLA-012.mkv") can still be resolved, but only through the
+    // file names (issue #52). The folder's own name never carries the code.
+    final codeMatch = await _externalBestForFileNames(fileNames);
+    if (codeMatch != null) {
+      final meta = TmdMeta(movie: codeMatch.movie);
+      _cache[metadataKey] = meta;
+      await TmdStore.save(metadataKey, meta);
+      return meta;
+    }
     TmdMeta? last;
     for (final c in candidates) {
       last = await _resolveFolderNow(

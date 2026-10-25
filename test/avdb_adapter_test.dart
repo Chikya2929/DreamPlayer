@@ -219,6 +219,27 @@ void main() {
         expect(seen, ['SVFLA012', 'SVFLA-012']);
       });
 
+      test('the code is read from the RAW name, not the parsed title', () async {
+        // The filename parser strips the trailing number as a movie-part
+        // suffix, so the parsed title of `MIAA-818.mkv` is just "MIAA"
+        // (issue #52). The adapter has to use the original name.
+        final seen = <String>[];
+        final adapter = AvdbAdapter(
+          transport: (uri) async {
+            seen.add(uri.queryParameters['wd'] ?? '');
+            return _decode(detailEnvelope);
+          },
+        );
+        await adapter.setEnabled(true);
+        final parsed = ParsedFileName.parse('MIAA-818.mkv');
+        expect(parsed.title, 'MIAA');
+        final match = await adapter.bestMatch(parsed);
+        expect(match, isNotNull);
+        expect(match!.score, 1.0);
+        expect(match.movie.alternateTitles, contains('MIAA-818'));
+        expect(seen, contains('MIAA-818'));
+      });
+
       test('the first spelling that hits is the one that is used', () async {
         final seen = <String>[];
         final adapter = AvdbAdapter(

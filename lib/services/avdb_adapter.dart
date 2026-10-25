@@ -123,6 +123,45 @@ class AvdbAdapter extends MetadataProviderAdapter {
     return const [];
   }
 
+  /// Resolve a file name to a record.
+  ///
+  /// A catalogue code in the ORIGINAL name is an exact lookup (issue #52):
+  /// AVDb's `wd=` matches `movie_code`, but the parsed title drops the code
+  /// (`SVFLA-012.mkv` parses to the title "SVFLA"), so the base
+  /// implementation — which searches the parsed title — could never use it.
+  @override
+  Future<TmdMatch?> bestMatch(ParsedFileName parsed) async {
+    if (!await isConfigured()) return null;
+    final code = MetadataProviderAdapter.catalogueCodeIn(parsed.rawName ?? parsed.title);
+    if (code != null) {
+      final hits = await search(code);
+      for (final hit in hits) {
+        final hitCode = hit.alternateTitles
+            .map((t) => t.trim().toUpperCase().replaceAll('_', '-'))
+            .firstWhere((t) => t == code, orElse: () => '');
+        if (hitCode.isEmpty) continue;
+        final fetched = await details(hit);
+        return TmdMatch(
+          TmdMovie(
+            id: hit.id,
+            title: hit.title,
+            year: hit.year,
+            posterPath: fetched?.posterPath ?? hit.posterPath,
+            overview: fetched?.overview ?? hit.overview,
+            kind: TmdKind.movie,
+            provider: hit.provider,
+            originalTitle: hit.originalTitle,
+            alternateTitles: hit.alternateTitles,
+            providerId: hit.providerId,
+          ),
+          1.0,
+        );
+      }
+    }
+    // No code, or the catalogue did not know it: fall back to a name search.
+    return super.bestMatch(parsed);
+  }
+
   /// The spellings of [term] to try, in order.
   ///
   /// Only the separator-less catalogue-code form needs a second attempt:

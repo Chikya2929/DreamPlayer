@@ -295,6 +295,27 @@ void main() {
       );
       expect(match, isNull);
     });
+
+    test('the code is read from the RAW name, not the parsed title', () async {
+      // The filename parser strips the trailing number as a movie-part
+      // suffix, so the parsed title of `SVFLA-012.mkv` is just "SVFLA"
+      // (issue #52). The adapter has to use the original name.
+      final adapter = await enabled();
+      final parsed = ParsedFileName.parse('SVFLA-012.mkv');
+      expect(parsed.title, 'SVFLA');
+      final match = await adapter.bestMatch(parsed);
+      expect(match, isNotNull);
+      expect(match!.movie.providerId, '1svfla012');
+      expect(match.score, 1.0);
+    });
+
+    test('a code after a studio prefix is read from the raw name', () async {
+      final adapter = await enabled();
+      final parsed = ParsedFileName.parse('[FLAVORY] SVFLA-012.mkv');
+      final match = await adapter.bestMatch(parsed);
+      expect(match, isNotNull);
+      expect(match!.movie.providerId, '1svfla012');
+    });
   });
 
   group('registry', () {
