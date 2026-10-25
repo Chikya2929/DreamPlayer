@@ -42,6 +42,7 @@ import '../services/open_intent.dart';
 import '../services/download_manager.dart';
 import '../utils/chapter_nav.dart';
 import '../utils/episode_label.dart';
+import '../utils/gesture_safety.dart';
 import '../utils/screen_orientation.dart';
 import '../utils/mpv_audio_select.dart';
 import '../utils/mpv_volume.dart';
@@ -58,6 +59,7 @@ import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
 import '../widgets/airplay_button.dart';
 import '../widgets/format_chip.dart';
+import '../widgets/gesture_warning_pill.dart';
 import 'player_error.dart';
 import '../services/entitlements.dart';
 import 'paywall_sheet.dart';
@@ -277,6 +279,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// buttons and by a double-tap on the seekbar (issue #40).
   String? _chapterToast;
   Timer? _chapterToastTimer;
+
+  /// Flash warning shown when the brightness / volume gesture reaches a risky
+  /// threshold: volume above 100% (the boost band) or full brightness.
+  String? _gestureSafetyWarning;
+  Timer? _gestureSafetyWarningTimer;
 
   /// Bumped per open so a slow MPV chapter poll from the previous file cannot
   /// land on this one.
@@ -706,6 +713,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     final video = _current;
     // A chapter toast from the previous file must not linger into this one.
     _dismissChapterToast();
+    // Same for a gesture safety warning.
+    _gestureSafetyWarningTimer?.cancel();
+    _gestureSafetyWarning = null;
     // Invalidate any in-flight MPV chapter poll for the previous file.
     _mpvChapterProbeToken++;
     // A new video means a previous software-decode fallback was for the last
@@ -3959,6 +3969,7 @@ Future<void> _offerVc1Mpv() async {
     _singleTapTimer?.cancel();
     _dtSeekTimer?.cancel();
     _chapterToastTimer?.cancel();
+    _gestureSafetyWarningTimer?.cancel();
     // Put the user's original decoder mode back if we forced software for the
     // current file's hardware-decoder failure.
     unawaited(_restoreDecoderOverride());
@@ -4310,10 +4321,47 @@ if (mounted) setState(_applySwipeValue);
     }
   }
 
+  /// The transient warning pill shown above the gesture overlay when the
+  /// gesture crosses a risky threshold.
+  Widget _buildGestureSafetyWarning() =>
+      GestureWarningPill(message: _gestureSafetyWarning ?? '');
+
   void _updateSwipe(double dy) {
     if (_swipeType == null || !_swipeGestureActive) return;
     _swipeDragDelta += -dy / (MediaQuery.of(context).size.height * 0.7);
+    final previous = _swipeCurrentValue;
     setState(_applySwipeValue);
+    _checkGestureSafety(previous, _swipeCurrentValue);
+  }
+
+  /// Flashes the one-off safety warning when the gesture crosses a risky
+  /// threshold (volume above 100%, or brightness at full).
+  ///
+  /// The check lives in the drag update, not in `_applySwipeValue`, because
+  /// `_applySwipeValue` also runs when the gesture BASE is seeded: a gesture
+  /// that starts while the boost is already engaged would otherwise read as a
+  /// fresh crossing and warn for a threshold the user crossed long ago.
+  void _checkGestureSafety(double previous, double next) {
+    final warning = gestureSafetyWarning(
+      isVolume: _swipeType == _SwipeType.volume,
+      previous: previous,
+      next: next,
+    );
+    if (warning == GestureSafetyWarning.none) return;
+    final l10n = AppLocalizations.of(context);
+    final message = switch (warning) {
+      GestureSafetyWarning.volumeAboveNormal =>
+        l10n.playerVolumeBoostWarning,
+      GestureSafetyWarning.brightnessFull =>
+        l10n.playerBrightnessBatteryWarning,
+      GestureSafetyWarning.none => null,
+    };
+    if (message == null) return;
+    _gestureSafetyWarningTimer?.cancel();
+    setState(() => _gestureSafetyWarning = message);
+    _gestureSafetyWarningTimer = Timer(const Duration(milliseconds: 2600), () {
+      if (mounted) setState(() => _gestureSafetyWarning = null);
+    });
   }
 
   void _endSwipe() {
@@ -7514,65 +7562,79 @@ if (mounted) setState(_applySwipeValue);
                 bottom: 96,
                 child: Center(child: _buildSeekPreview()),
               ),
-            // Swipe-gesture feedback overlay (brightness / volume).
-            if (_swipeType != null || _swipeOverlayTimer?.isActive == true)
+            // Swipe-gesture feedback overlay (brightness / volume) plus the
+            // one-off safety warning that fires at the risky thresholds
+            // (volume above 100%, full brightness).
+            if (_swipeType != null ||
+                _swipeOverlayTimer?.isActive == true ||
+                _gestureSafetyWarning != null)
               Center(
-                child: AnimatedOpacity(
-                  opacity: _swipeType != null ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Container(
-                    width: 140,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _swipeType == _SwipeType.brightness
-                              ? Icons.brightness_6
-                              : Icons.volume_up,
-                          color: Colors.white,
-                          size: 28,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_gestureSafetyWarning != null) ...[
+                      _buildGestureSafetyWarning(),
+                      const SizedBox(height: 16),
+                    ],
+                    AnimatedOpacity(
+                      opacity: _swipeType != null ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        width: 140,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
                         ),
-                        SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            // Normalised: the volume gesture now runs 0-2.0
-                            // (100% + boost) and this widget asserts a 0..1
-                            // value. Dividing by the active ceiling also makes
-                            // the bar visibly fill through the boost half
-                            // rather than pinning at the end.
-                            value: _swipeCurrentValue /
-                                (_swipeType == _SwipeType.volume
-                                    ? volumeCeiling(
-                                        boostEnabled: _volumeBoostEnabled)
-                                    : 1.0),
-                            minHeight: 4,
-                            backgroundColor: Colors.white24,
-                            valueColor: const AlwaysStoppedAnimation(
-                              Colors.white,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _swipeType == _SwipeType.brightness
+                                  ? Icons.brightness_6
+                                  : Icons.volume_up,
+                              color: Colors.white,
+                              size: 28,
                             ),
-                          ),
+                            SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(2),
+                              child: LinearProgressIndicator(
+                                // Normalised: the volume gesture now runs
+                                // 0-2.0 (100% + boost) and this widget asserts
+                                // a 0..1 value. Dividing by the active ceiling
+                                // also makes the bar visibly fill through the
+                                // boost half rather than pinning at the end.
+                                value: _swipeCurrentValue /
+                                    (_swipeType == _SwipeType.volume
+                                        ? volumeCeiling(
+                                            boostEnabled:
+                                                _volumeBoostEnabled)
+                                        : 1.0),
+                                minHeight: 4,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation(
+                                  Colors.white,
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              '${(_swipeCurrentValue * 100).round()}%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        SizedBox(height: 6),
-                        Text(
-                          '${(_swipeCurrentValue * 100).round()}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             if (_buffering && _backendReady && _error == null)

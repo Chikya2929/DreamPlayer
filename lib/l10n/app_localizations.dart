@@ -3120,6 +3120,18 @@ abstract class AppLocalizations {
   /// **'Sleep timer finished — playback paused'**
   String get playerSleepTimerFinished;
 
+  /// Warning shown when the volume gesture crosses above 100% into boost
+  ///
+  /// In en, this message translates to:
+  /// **'Above 100% can damage your speakers — use at your own risk'**
+  String get playerVolumeBoostWarning;
+
+  /// Warning shown when the brightness gesture reaches full brightness
+  ///
+  /// In en, this message translates to:
+  /// **'Full brightness drains the battery faster'**
+  String get playerBrightnessBatteryWarning;
+
   /// Downloaded status label
   ///
   /// In en, this message translates to:

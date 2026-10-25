@@ -1610,6 +1610,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Temporizador terminado — reproducción pausada';
 
   @override
+  String get playerVolumeBoostWarning =>
+      'Por encima del 100 % puede dañar tus altavoces: úsalo bajo tu responsabilidad';
+
+  @override
+  String get playerBrightnessBatteryWarning =>
+      'El brillo al máximo agota la batería más rápido';
+
+  @override
   String get playerDownloaded => 'Descargado';
 
   @override

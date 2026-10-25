@@ -2003,6 +2003,14 @@
   "@playerDownloadFailed": {
     "description": "Translated key"
   },
+  "playerVolumeBoostWarning": "Por encima del 100 % puede dañar tus altavoces: úsalo bajo tu responsabilidad",
+  "@playerVolumeBoostWarning": {
+    "description": "Translated key"
+  },
+  "playerBrightnessBatteryWarning": "El brillo al máximo agota la batería más rápido",
+  "@playerBrightnessBatteryWarning": {
+    "description": "Translated key"
+  },
   "playerDownloaded": "Descargado",
   "@playerDownloaded": {
     "description": "Translated key"

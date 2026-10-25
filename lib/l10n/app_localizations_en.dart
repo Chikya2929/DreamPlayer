@@ -1600,6 +1600,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Sleep timer finished — playback paused';
 
   @override
+  String get playerVolumeBoostWarning =>
+      'Above 100% can damage your speakers — use at your own risk';
+
+  @override
+  String get playerBrightnessBatteryWarning =>
+      'Full brightness drains the battery faster';
+
+  @override
   String get playerDownloaded => 'Downloaded';
 
   @override

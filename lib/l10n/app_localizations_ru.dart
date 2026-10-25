@@ -1608,6 +1608,14 @@ class AppLocalizationsRu extends AppLocalizations {
       'Таймер истёк — воспроизведение приостановлено';
 
   @override
+  String get playerVolumeBoostWarning =>
+      'Выше 100 % может повредить динамики — используйте на свой страх и риск';
+
+  @override
+  String get playerBrightnessBatteryWarning =>
+      'Максимальная яркость быстрее разряжает батарею';
+
+  @override
   String get playerDownloaded => 'Загружено';
 
   @override

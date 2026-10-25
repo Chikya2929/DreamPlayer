@@ -1594,6 +1594,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playerSleepTimerFinished => '睡眠定时结束 — 播放已暂停';
 
   @override
+  String get playerVolumeBoostWarning => '超过 100% 可能损坏扬声器 — 请自行承担风险';
+
+  @override
+  String get playerBrightnessBatteryWarning => '最高亮度会更快消耗电池';
+
+  @override
   String get playerDownloaded => '已下载';
 
   @override

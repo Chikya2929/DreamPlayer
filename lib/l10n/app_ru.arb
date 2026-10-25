@@ -2003,6 +2003,14 @@
   "@playerDownloadFailed": {
     "description": "Translated key"
   },
+  "playerVolumeBoostWarning": "Выше 100 % может повредить динамики — используйте на свой страх и риск",
+  "@playerVolumeBoostWarning": {
+    "description": "Translated key"
+  },
+  "playerBrightnessBatteryWarning": "Максимальная яркость быстрее разряжает батарею",
+  "@playerBrightnessBatteryWarning": {
+    "description": "Translated key"
+  },
   "playerDownloaded": "Загружено",
   "@playerDownloaded": {
     "description": "Translated key"
