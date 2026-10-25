@@ -2642,7 +2642,7 @@ The home library shows **only folders the user explicitly adds** — nothing is 
   - **It cannot repair existing installs.** Anyone currently on a CI release is signed with a key that exists nowhere. They uninstall **once**, then every future update works.
   - **versionCode was NOT the cause** (issue #43's second theory), but there is a separate trap: `flutter build apk --split-per-abi` applies `abiVersionCode * 1000 + base` (`FlutterPlugin.kt`, `ARCH_ARM64 -> 2`), so published codes are `universal 40` / `arm64-v8a 2040` for v0.5.1. Both increase per release, but because arm64 always beats universal, **a user on the arm64 split APK cannot later install a universal build** — Android reads it as a downgrade. Tell users to pick one flavour and stay on it. Verify with `aapt2 dump badging <apk> | grep versionCode`; the hand-pinned `versionCode` in `build.gradle.kts` is the `base`, not the shipped number.
 
-### Alternative app stores: Obtainium (live) and IzzyOnDroid (blocked on APK size)
+### Alternative app stores: Obtainium (live), IzzyOnDroid (declined — AI policy), F-Droid (deferred)
 
 - **Obtainium needs no listing or submission.** Users add the GitHub repo and
   Obtainium installs each release, signature-checked. The README and the website
@@ -2656,24 +2656,46 @@ The home library shows **only folders the user explicitly adds** — nothing is 
   `docs/assets/img/badge-obtainium.png` (trimmed to 322×96, displayed 161×48);
   the Obtainium wiki asks projects to self-host rather than hotlink
   `raw.githubusercontent.com`.
-- **IzzyOnDroid is blocked by its documented 30 MB APK cap** ("We cannot
-  currently accept APK files over 30 MB"). Measured v0.5.4 assets: universal
-  **165 MB**, arm64 **71 MB**, x86_64 **60 MB**, armv7 **50 MB**. Dropping the
-  custom `libmpv.so` (29 MB) does not help — `libapp.so` (17 MB),
-  `libflutter.so` (12 MB) and dex (6 MB) are already 35 MB, so a slim flavour
-  would lose the second engine *and* still miss the cap. Do not re-investigate
-  this as a packaging bug.
+- **IzzyOnDroid: DECLINED by the user (2026-10-25) after reading the full App
+  Inclusion Policy — the APK cap is the smaller of two blockers.**
+  - **AI policy is the real blocker.** They are "strongly opposed to apps which
+    are fully or in part created by generative AI tools", "Vibe-coded apps will
+    be rejected", and LLM use is acceptable only for read-only tasks "provided
+    their output is not included in the app's code". The inclusion form
+    *requires* an AI-usage disclosure, and "any lack of transparency discovered
+    by us, can lead to the project being degraded to rejected state". This
+    codebase is substantially AI-written, so an honest disclosure means
+    automatic rejection and a dishonest one risks blacklisting. **Do not file
+    without a deliberate product decision to change that answer.**
+  - **Size**: 30 MB is both the budget and "the upper size limit for single
+    `.apk` files" (exceptions are for "some larger apps"). Measured v0.5.4
+    assets: universal **165 MB**, arm64 **71 MB**, x86_64 **60 MB**, armv7
+    **50 MB**. Dropping the custom `libmpv.so` (29 MB) does not help —
+    `libapp.so` (17 MB), `libflutter.so` (12 MB) and dex (6 MB) are already
+    35 MB, so a slim flavour would lose the second engine *and* still miss the
+    cap. Do not re-investigate this as a packaging bug.
+  - **Secondary risks, recorded so they are not rediscovered**: the opt-in
+    adult metadata providers (AVDb/r18.dev, default off) touch their "no
+    controversial topics" clause even though the listing text/graphics are
+    clean; and `usesCleartextTraffic="true"` (needed for the CX proxy and LAN
+    HTTP) is tolerated for media players but they "strongly recommend" a
+    Network Security Config.
+  - **Consequence**: GitHub Releases + Obtainium are the Android channels. The
+    fastlane tree below is still committed — it is the format any future
+    storefront (or a compliance-clean F-Droid build) would read.
 - **Fastlane tree** (`fastlane/metadata/android/en-US/`) exists for any
   storefront that reads it (IzzyOnDroid, F-Droid). Traps: `changelogs/<file>.txt`
   is named after the **hand-pinned Android `versionCode`** (43), not pubspec's
   `+N`; the changelog is capped at **500 bytes plain ASCII**; screenshots must
   be PNG/JPG with a height/width ratio **≤ 2:1** (the 900×1980 device captures
   are 2.2, so they are padded to 990×1980 with the app background rather than
-  cropped); `featureGraphic.png` must be exactly **1024×500** or 512×250.
+  cropped); `featureGraphic.png` must be exactly **1024×500** or 512×250. The
+  tree is validated by `test/fastlane_metadata_test.dart` (limits, the
+  changelog↔`versionCode` coupling, image presence) and passes
+  `ashutoshgngwr/validate-fastlane-supply-metadata:v2` ("found 0 errors!").
 - IzzyOnDroid inclusion requests are a **Codeberg issue form**
   (`codeberg.org/IzzyOnDroid/repodata/issues`, template
-  `app-inclusion-request.yaml`), not GitLab as older notes said. The form
-  requires build instructions and an honest AI-usage disclosure.
+  `app-inclusion-request.yaml`), not GitLab as older notes said.
 
 - **App Store metadata is SEPARATE from `CHANGELOG.md` — Guideline 2.3.10 (2026-10-12).** App Review rejected 0.5.1 (36) under "Accurate Metadata": *"The app or metadata includes information about third-party platforms"*, next step *"Revise the app's What's New text to remove Android references."* The cause was copying from `CHANGELOG.md`, which is **Android-first by design** (it feeds GitHub Releases) and contains `Android`, `libmpv`/`MPV`/`Media3`, `SystemCodec`, `HTTP 400`, pixel widths and dB figures. Much of each entry is also **Android-only** (the VobSub OOM is `SubtitleFormats.kt`, the orientation bug is `Activity.setRequestedOrientation`, 4K subtitle scaling is libmpv) so it was noise for an iOS reviewer regardless. **Use `.github/release_notes_ios.md` for App Store Connect What's New**; its header lists the rules (no other platform, no engine names, no internal identifiers, iOS-visible changes only). Do not "fix" this by removing detail from `CHANGELOG.md` — GitHub Releases need it.
   - **Fast path when this happens**: Apple's message says the issue is *"eligible to be resolved on your next update"* and *"If this submission includes bug fixes […] reply to this message and let us know. You do not need to resubmit."* Since each release is mostly bug fixes, reply with the corrected text and request approval rather than rebuilding.
