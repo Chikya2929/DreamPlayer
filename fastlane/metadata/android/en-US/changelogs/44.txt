@@ -3,8 +3,9 @@
 New: a key-free film catalogue that matches by catalogue code, and a warning
 before you push the volume past 100% or the brightness past 80%.
 
-Improved: the Get info and Fix match dialogs now search the key-free
-catalogues, and a matched film keeps its own poster and synopsis.
+Improved: the Get info and Fix match dialogs search the key-free catalogues,
+and a matched film keeps its own poster and synopsis.
 
-Fixed: the transport buttons in the player now read previous chapter, back
-10 s, play, forward 10 s, next, plus playback and browsing fixes.
+Fixed: the transport buttons in the player read previous chapter, back 10 s,
+play, forward 10 s, next. The Player settings section is back on Fire OS, so
+you can pick the playback engine on the stick.

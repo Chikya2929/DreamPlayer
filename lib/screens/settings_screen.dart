@@ -1133,12 +1133,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const _LayoutSection(),
             // === Player ===
-            if (!isTv)
-              ExpansionTile(
-                leading: const Icon(Icons.play_circle_outline),
-                title: Text(AppLocalizations.of(context).settingsPlayer),
-                childrenPadding: const EdgeInsets.only(bottom: 8),
-                children: [
+            ExpansionTile(
+              leading: const Icon(Icons.play_circle_outline),
+              title: Text(AppLocalizations.of(context).settingsPlayer),
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              children: [
+                if (!isTv)
                   SwitchListTile(
                     secondary: const Icon(Icons.swipe),
                     title: Text(AppLocalizations.of(context).settingsSwipeGestures),
@@ -1152,309 +1152,309 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       if (mounted) setState(() => _swipeGestures = value);
                     },
                   ),
-                  if (defaultTargetPlatform == TargetPlatform.android ||
-                      defaultTargetPlatform == TargetPlatform.iOS)
-                    SwitchListTile(
-                      secondary: const Icon(Icons.picture_in_picture),
-                      title: Text(AppLocalizations.of(context).settingsPip),
-                      subtitle: Text(
-                        AppLocalizations.of(context).settingsPipDesc,
-                      ),
-                      value: _pipEnabled,
-                      onChanged: (value) async {
-                        final prefs = await SharedPreferences.getInstance();
-                        await prefs.setBool(kPipEnabledKey, value);
-                        if (mounted) setState(() => _pipEnabled = value);
-                      },
-                    ),
-                  if (defaultTargetPlatform == TargetPlatform.android)
-                    ListTile(
-                      leading: const Icon(Icons.play_circle_outline),
-                      title: Text(AppLocalizations.of(context).settingsDefaultEngine),
-                      subtitle: Text(_defaultEngine.label),
-                      onTap: () async {
-                        final picked = await showDialog<DefaultEngine>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: Text(AppLocalizations.of(context).settingsDefaultEngine),
-                            content: RadioGroup<DefaultEngine>(
-                              groupValue: _defaultEngine,
-                              onChanged: (v) => Navigator.pop(ctx, v),
-                              child: _ScrollableRadioList(
-                                children: DefaultEngine.values.map((e) {
-                                  final subtitle = switch (e) {
-                                    DefaultEngine.auto =>
-                                      AppLocalizations.of(context).settingsEngineAutoDesc,
-                                    DefaultEngine.media3 =>
-                                      AppLocalizations.of(context).settingsEngineMedia3Desc,
-                                    DefaultEngine.mpv =>
-                                      AppLocalizations.of(context).settingsEngineMpvDesc,
-                                    DefaultEngine.ask =>
-                                      AppLocalizations.of(context).settingsEngineAskDesc,
-                                  };
-                                  return RadioListTile<DefaultEngine>(
-                                    value: e,
-                                    title: Text(e.label),
-                                    subtitle: Text(subtitle,
-                                        style: const TextStyle(fontSize: 12)),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: Text(AppLocalizations.of(context).commonCancel),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (picked != null && mounted) {
-                          await DefaultEngineStore.save(picked);
-                          setState(() => _defaultEngine = picked);
-                        }
-                      },
-                    ),
-                  if (defaultTargetPlatform == TargetPlatform.android &&
-                      _showMpvSettings)
-                    ListTile(
-                      leading: const Icon(Icons.palette_outlined),
-                      title: Text(AppLocalizations.of(context).settingsToneMapMode),
-                      subtitle: Text(_toneMapMode.label),
-                      onTap: () async {
-                        final picked = await showDialog<ToneMapMode>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: Text(AppLocalizations.of(context).settingsToneMapMode),
-                            content: RadioGroup<ToneMapMode>(
-                              groupValue: _toneMapMode,
-                              onChanged: (v) => Navigator.pop(ctx, v),
-                              child: _ScrollableRadioList(
-                                children: ToneMapMode.values.map((m) {
-                                  final subtitle = switch (m) {
-                                    ToneMapMode.sdr =>
-                                      AppLocalizations.of(context).settingsToneMapSdrDesc,
-                                    ToneMapMode.native =>
-                                      AppLocalizations.of(context).settingsToneMapNativeDesc,
-                                  };
-                                  return RadioListTile<ToneMapMode>(
-                                    value: m,
-                                    title: Text(m.label),
-                                    subtitle: Text(subtitle,
-                                        style: const TextStyle(fontSize: 12)),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: Text(AppLocalizations.of(context).commonCancel),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (picked != null && mounted) {
-                          await ToneMapStore.save(picked);
-                          setState(() => _toneMapMode = picked);
-                        }
-                      },
-                    ),
+                if (defaultTargetPlatform == TargetPlatform.android ||
+                    defaultTargetPlatform == TargetPlatform.iOS)
                   SwitchListTile(
-                    secondary: const Icon(Icons.skip_next),
-                    title: Text(AppLocalizations.of(context).settingsAutoPlayNext),
-                    subtitle: Text(AppLocalizations.of(context).settingsAutoPlayNextDesc),
-                    value: _autoPlayNext,
+                    secondary: const Icon(Icons.picture_in_picture),
+                    title: Text(AppLocalizations.of(context).settingsPip),
+                    subtitle: Text(
+                      AppLocalizations.of(context).settingsPipDesc,
+                    ),
+                    value: _pipEnabled,
                     onChanged: (value) async {
                       final prefs = await SharedPreferences.getInstance();
-                      await prefs.setBool(kAutoPlayNextKey, value);
-                      if (mounted) setState(() => _autoPlayNext = value);
+                      await prefs.setBool(kPipEnabledKey, value);
+                      if (mounted) setState(() => _pipEnabled = value);
                     },
                   ),
-                  if (defaultTargetPlatform == TargetPlatform.android &&
-                      _showMedia3Settings)
-                    TvTile(
-                      leading: const Icon(Icons.memory),
-                      title: Text(AppLocalizations.of(context).settingsVideoDecoder),
-                      subtitle: Text(switch (_decoderMode) {
-                        DecoderMode.hw => 'Hardware — fastest, HDR passthrough',
-                        DecoderMode.sw => 'Software — compatibility fallback',
-                        _ => 'Auto — hardware when available',
-                      }),
-                      onTap: () async {
-                        final picked = await showDialog<DecoderMode>(
-                          context: context,
-                          builder: (context) => SimpleDialog(
-                            title: Text(AppLocalizations.of(context).playerVideoDecoder),
-                            children: [
-                              RadioGroup<DecoderMode>(
-                                groupValue: _decoderMode,
-                                onChanged: (v) => Navigator.of(context).pop(v),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    for (final m in DecoderMode.values)
-                                      if (m != DecoderMode.ffmpegVideo)
-                                      RadioListTile<DecoderMode>(
-                                        value: m,
-                                        title: Text(m.label),
-                                        subtitle: Text(switch (m) {
-                                          DecoderMode.hw =>
-                                            AppLocalizations.of(context).settingsDecoderHw,
-                                          DecoderMode.sw =>
-                                            AppLocalizations.of(context).settingsDecoderSw,
-                                          _ =>
-                                            AppLocalizations.of(context).settingsDecoderAuto,
-                                        }),
-                                      ),
-                                  ],
-                                ),
+                if (defaultTargetPlatform == TargetPlatform.android)
+                  ListTile(
+                    leading: const Icon(Icons.play_circle_outline),
+                    title: Text(AppLocalizations.of(context).settingsDefaultEngine),
+                    subtitle: Text(_defaultEngine.label),
+                    onTap: () async {
+                      final picked = await showDialog<DefaultEngine>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: Text(AppLocalizations.of(context).settingsDefaultEngine),
+                          content: RadioGroup<DefaultEngine>(
+                            groupValue: _defaultEngine,
+                            onChanged: (v) => Navigator.pop(ctx, v),
+                            child: _ScrollableRadioList(
+                              children: DefaultEngine.values.map((e) {
+                                final subtitle = switch (e) {
+                                  DefaultEngine.auto =>
+                                    AppLocalizations.of(context).settingsEngineAutoDesc,
+                                  DefaultEngine.media3 =>
+                                    AppLocalizations.of(context).settingsEngineMedia3Desc,
+                                  DefaultEngine.mpv =>
+                                    AppLocalizations.of(context).settingsEngineMpvDesc,
+                                  DefaultEngine.ask =>
+                                    AppLocalizations.of(context).settingsEngineAskDesc,
+                                };
+                                return RadioListTile<DefaultEngine>(
+                                  value: e,
+                                  title: Text(e.label),
+                                  subtitle: Text(subtitle,
+                                      style: const TextStyle(fontSize: 12)),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: Text(AppLocalizations.of(context).commonCancel),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (picked != null && mounted) {
+                        await DefaultEngineStore.save(picked);
+                        setState(() => _defaultEngine = picked);
+                      }
+                    },
+                  ),
+                if (defaultTargetPlatform == TargetPlatform.android &&
+                    _showMpvSettings)
+                  ListTile(
+                    leading: const Icon(Icons.palette_outlined),
+                    title: Text(AppLocalizations.of(context).settingsToneMapMode),
+                    subtitle: Text(_toneMapMode.label),
+                    onTap: () async {
+                      final picked = await showDialog<ToneMapMode>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: Text(AppLocalizations.of(context).settingsToneMapMode),
+                          content: RadioGroup<ToneMapMode>(
+                            groupValue: _toneMapMode,
+                            onChanged: (v) => Navigator.pop(ctx, v),
+                            child: _ScrollableRadioList(
+                              children: ToneMapMode.values.map((m) {
+                                final subtitle = switch (m) {
+                                  ToneMapMode.sdr =>
+                                    AppLocalizations.of(context).settingsToneMapSdrDesc,
+                                  ToneMapMode.native =>
+                                    AppLocalizations.of(context).settingsToneMapNativeDesc,
+                                };
+                                return RadioListTile<ToneMapMode>(
+                                  value: m,
+                                  title: Text(m.label),
+                                  subtitle: Text(subtitle,
+                                      style: const TextStyle(fontSize: 12)),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: Text(AppLocalizations.of(context).commonCancel),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (picked != null && mounted) {
+                        await ToneMapStore.save(picked);
+                        setState(() => _toneMapMode = picked);
+                      }
+                    },
+                  ),
+                SwitchListTile(
+                  secondary: const Icon(Icons.skip_next),
+                  title: Text(AppLocalizations.of(context).settingsAutoPlayNext),
+                  subtitle: Text(AppLocalizations.of(context).settingsAutoPlayNextDesc),
+                  value: _autoPlayNext,
+                  onChanged: (value) async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool(kAutoPlayNextKey, value);
+                    if (mounted) setState(() => _autoPlayNext = value);
+                  },
+                ),
+                if (defaultTargetPlatform == TargetPlatform.android &&
+                    _showMedia3Settings)
+                  TvTile(
+                    leading: const Icon(Icons.memory),
+                    title: Text(AppLocalizations.of(context).settingsVideoDecoder),
+                    subtitle: Text(switch (_decoderMode) {
+                      DecoderMode.hw => 'Hardware — fastest, HDR passthrough',
+                      DecoderMode.sw => 'Software — compatibility fallback',
+                      _ => 'Auto — hardware when available',
+                    }),
+                    onTap: () async {
+                      final picked = await showDialog<DecoderMode>(
+                        context: context,
+                        builder: (context) => SimpleDialog(
+                          title: Text(AppLocalizations.of(context).playerVideoDecoder),
+                          children: [
+                            RadioGroup<DecoderMode>(
+                              groupValue: _decoderMode,
+                              onChanged: (v) => Navigator.of(context).pop(v),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (final m in DecoderMode.values)
+                                    if (m != DecoderMode.ffmpegVideo)
+                                    RadioListTile<DecoderMode>(
+                                      value: m,
+                                      title: Text(m.label),
+                                      subtitle: Text(switch (m) {
+                                        DecoderMode.hw =>
+                                          AppLocalizations.of(context).settingsDecoderHw,
+                                        DecoderMode.sw =>
+                                          AppLocalizations.of(context).settingsDecoderSw,
+                                        _ =>
+                                          AppLocalizations.of(context).settingsDecoderAuto,
+                                      }),
+                                    ),
+                                ],
                               ),
-                            ],
+                            ),
+                          ],
+                        ),
+                      );
+                      if (picked != null) {
+                        await DecoderModeStore.save(picked);
+                        if (mounted) setState(() => _decoderMode = picked);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(AppLocalizations.of(context).settingsTakesEffectNextVideo),
                           ),
                         );
-                        if (picked != null) {
-                          await DecoderModeStore.save(picked);
-                          if (mounted) setState(() => _decoderMode = picked);
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(AppLocalizations.of(context).settingsTakesEffectNextVideo),
-                            ),
-                          );
-                        }
-                      },
-                    ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.label),
-                    title: Text(AppLocalizations.of(context).settingsOnScreenBadges),
-                    subtitle: Text(
-                      AppLocalizations.of(context).settingsBadgesDesc,
-                    ),
-                    value: _badgeEnabled,
-                    onChanged: (value) async {
-                      await BadgePrefs.setEnabled(value);
-                      if (mounted) setState(() => _badgeEnabled = value);
+                      }
                     },
                   ),
-                  if (_badgeEnabled)
-                    // The badge list is long and rarely changed, so it is
-                    // collapsed behind a chevron instead of always open -- it
-                    // used to push every control below it down the page.
-                    Theme(
-                      data: Theme.of(context).copyWith(
-                        dividerColor: Colors.transparent,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 16),
-                        child: ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          childrenPadding: const EdgeInsets.only(bottom: 8),
-                          title: Text(
-                            AppLocalizations.of(context).settingsBadgeOptions,
-                          ),
-                          children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(40, 8, 16, 4),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Format',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                SwitchListTile(
+                  secondary: const Icon(Icons.label),
+                  title: Text(AppLocalizations.of(context).settingsOnScreenBadges),
+                  subtitle: Text(
+                    AppLocalizations.of(context).settingsBadgesDesc,
+                  ),
+                  value: _badgeEnabled,
+                  onChanged: (value) async {
+                    await BadgePrefs.setEnabled(value);
+                    if (mounted) setState(() => _badgeEnabled = value);
+                  },
+                ),
+                if (_badgeEnabled)
+                  // The badge list is long and rarely changed, so it is
+                  // collapsed behind a chevron instead of always open -- it
+                  // used to push every control below it down the page.
+                  Theme(
+                    data: Theme.of(context).copyWith(
+                      dividerColor: Colors.transparent,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        childrenPadding: const EdgeInsets.only(bottom: 8),
+                        title: Text(
+                          AppLocalizations.of(context).settingsBadgeOptions,
+                        ),
+                        children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(40, 8, 16, 4),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Format',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
-                          _BadgeToggle(
-                            icon: Icons.high_quality,
-                            label: 'HDR',
-                            subtitle: 'DV / HDR10 / HDR10+ / HLG / SDR',
-                            value: _badgeHdr,
-                            onChanged: (v) async {
-                              await BadgePrefs.setHdr(v);
-                              if (mounted) setState(() => _badgeHdr = v);
-                            },
-                          ),
-                          _BadgeToggle(
-                            icon: Icons.audiotrack,
-                            label: 'Audio codec',
-                            subtitle: 'E-AC3 · 5.1 / DTS-HD · 7.1 / AAC …',
-                            value: _badgeAudio,
-                            onChanged: (v) async {
-                              await BadgePrefs.setAudio(v);
-                              if (mounted) setState(() => _badgeAudio = v);
-                            },
-                          ),
-                          _BadgeToggle(
-                            icon: Icons.videocam,
-                            label: 'Video codec',
-                            subtitle: AppLocalizations.of(context).settingsBadgeVideoCodecDesc,
-                            value: _badgeVideoCodec,
-                            onChanged: (v) async {
-                              await BadgePrefs.setVideoCodec(v);
-                              if (mounted) setState(() => _badgeVideoCodec = v);
-                            },
-                          ),
-                          _BadgeToggle(
-                            icon: Icons.aspect_ratio,
-                            label: 'Resolution',
-                            value: _badgeResolution,
-                            onChanged: (v) async {
-                              await BadgePrefs.setResolution(v);
-                              if (mounted) setState(() => _badgeResolution = v);
-                            },
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(40, 8, 16, 4),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                AppLocalizations.of(context).settingsBadgePlayback,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                        ),
+                        _BadgeToggle(
+                          icon: Icons.high_quality,
+                          label: 'HDR',
+                          subtitle: 'DV / HDR10 / HDR10+ / HLG / SDR',
+                          value: _badgeHdr,
+                          onChanged: (v) async {
+                            await BadgePrefs.setHdr(v);
+                            if (mounted) setState(() => _badgeHdr = v);
+                          },
+                        ),
+                        _BadgeToggle(
+                          icon: Icons.audiotrack,
+                          label: 'Audio codec',
+                          subtitle: 'E-AC3 · 5.1 / DTS-HD · 7.1 / AAC …',
+                          value: _badgeAudio,
+                          onChanged: (v) async {
+                            await BadgePrefs.setAudio(v);
+                            if (mounted) setState(() => _badgeAudio = v);
+                          },
+                        ),
+                        _BadgeToggle(
+                          icon: Icons.videocam,
+                          label: 'Video codec',
+                          subtitle: AppLocalizations.of(context).settingsBadgeVideoCodecDesc,
+                          value: _badgeVideoCodec,
+                          onChanged: (v) async {
+                            await BadgePrefs.setVideoCodec(v);
+                            if (mounted) setState(() => _badgeVideoCodec = v);
+                          },
+                        ),
+                        _BadgeToggle(
+                          icon: Icons.aspect_ratio,
+                          label: 'Resolution',
+                          value: _badgeResolution,
+                          onChanged: (v) async {
+                            await BadgePrefs.setResolution(v);
+                            if (mounted) setState(() => _badgeResolution = v);
+                          },
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(40, 8, 16, 4),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              AppLocalizations.of(context).settingsBadgePlayback,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
-                          if (defaultTargetPlatform == TargetPlatform.android &&
-                              _showMedia3Settings)
-                            _BadgeToggle(
-                              icon: Icons.spatial_audio,
-                              label: 'Spatial audio',
-                              value: _badgeSpatialAudio,
-                              onChanged: (v) async {
-                                await BadgePrefs.setSpatialAudio(v);
-                                if (mounted) setState(() => _badgeSpatialAudio = v);
-                              },
-                            ),
+                        ),
+                        if (defaultTargetPlatform == TargetPlatform.android &&
+                            _showMedia3Settings)
                           _BadgeToggle(
-                            icon: Icons.sync,
-                            label: AppLocalizations.of(context).settingsBadgeTranscoding,
-                            value: _badgeServerTranscode,
+                            icon: Icons.spatial_audio,
+                            label: 'Spatial audio',
+                            value: _badgeSpatialAudio,
                             onChanged: (v) async {
-                              await BadgePrefs.setServerTranscode(v);
-                              if (mounted) setState(() => _badgeServerTranscode = v);
+                              await BadgePrefs.setSpatialAudio(v);
+                              if (mounted) setState(() => _badgeSpatialAudio = v);
                             },
                           ),
-                          _BadgeToggle(
-                            icon: Icons.memory,
-                            label: AppLocalizations.of(context).settingsBadgeDecoder,
-                            subtitle: AppLocalizations.of(context).settingsBadgeDecoderDesc,
-                            value: _badgeDecoder,
-                            onChanged: (v) async {
-                              await BadgePrefs.setDecoder(v);
-                              if (mounted) setState(() => _badgeDecoder = v);
-                            },
-                          ),
-                        ],
-                      ),
+                        _BadgeToggle(
+                          icon: Icons.sync,
+                          label: AppLocalizations.of(context).settingsBadgeTranscoding,
+                          value: _badgeServerTranscode,
+                          onChanged: (v) async {
+                            await BadgePrefs.setServerTranscode(v);
+                            if (mounted) setState(() => _badgeServerTranscode = v);
+                          },
+                        ),
+                        _BadgeToggle(
+                          icon: Icons.memory,
+                          label: AppLocalizations.of(context).settingsBadgeDecoder,
+                          subtitle: AppLocalizations.of(context).settingsBadgeDecoderDesc,
+                          value: _badgeDecoder,
+                          onChanged: (v) async {
+                            await BadgePrefs.setDecoder(v);
+                            if (mounted) setState(() => _badgeDecoder = v);
+                          },
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
             // === Audio (Android only) ===
             if (defaultTargetPlatform == TargetPlatform.android)
               ExpansionTile(

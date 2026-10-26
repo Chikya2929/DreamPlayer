@@ -29,6 +29,13 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Fixed
 
+- **The Player settings section was missing on Fire OS.** The whole section
+  was hidden on TVs since the Android TV work, because it was written when the
+  section held only the touch-only swipe-gestures toggle. That took the
+  **Default playback engine** picker, the **Video decoder** choice, **Auto-play
+  next**, **Picture-in-picture** and the on-screen badges with it — so there
+  was no way to pick an engine on the stick. Only the touch-only swipe row is
+  hidden on TV now; the rest of the section is there.
 - **Volume boost no longer loses the dialogue on 5.1/7.1 tracks (issue #41).**
   Above 100% boost on some devices the background music kept playing while
   voices disappeared. The boost used a platform audio effect, and the fallback
