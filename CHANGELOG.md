@@ -29,17 +29,6 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Fixed
 
-- **Dolby Vision played as a black picture on some TV boxes.** On certain
-  Fire TV devices the Dolby Vision decoder accepted the stream but never
-  rendered a frame: the picture stayed black, the audio played fine, and no
-  error was reported — the format chip even said "Dolby Vision". The player
-  now watches for the first video frame and, if none arrives, restarts the
-  file through the standard HDR10 base layer of the very same stream, so it
-  plays as HDR10 instead of staying black. The decision is remembered per
-  Dolby Vision profile, so the same file goes straight to the working path
-  next time, and the format chip reports HDR10 rather than claiming Dolby
-  Vision it is not delivering.
-
 - **Volume boost no longer loses the dialogue on 5.1/7.1 tracks (issue #41).**
   Above 100% boost on some devices the background music kept playing while
   voices disappeared. The boost used a platform audio effect, and the fallback

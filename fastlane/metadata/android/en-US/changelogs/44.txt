@@ -6,5 +6,5 @@ before you push the volume past 100% or the brightness past 80%.
 Improved: the Get info and Fix match dialogs now search the key-free
 catalogues, and a matched film keeps its own poster and synopsis.
 
-Fixed: Dolby Vision played as a black picture on some TV boxes - it now falls
-back to the HDR10 base layer of the same stream and remembers the choice.
+Fixed: the transport buttons in the player now read previous chapter, back
+10 s, play, forward 10 s, next, plus playback and browsing fixes.
