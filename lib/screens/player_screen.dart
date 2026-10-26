@@ -33,6 +33,7 @@ import '../services/sidecar_subtitle_service.dart';
 import '../services/mpv_pip.dart';
 import '../services/mpv_surface_view.dart';
 import '../services/mpv_downmix_store.dart';
+import '../services/mpv_interpolation_store.dart';
 import '../services/tone_map_store.dart';
 import '../services/subtitle_fonts.dart';
 import '../services/subtitle_style.dart';
@@ -45,6 +46,7 @@ import '../utils/episode_label.dart';
 import '../utils/gesture_safety.dart';
 import '../utils/screen_orientation.dart';
 import '../utils/mpv_audio_select.dart';
+import '../utils/mpv_interpolation.dart';
 import '../utils/mpv_volume.dart';
 import '../utils/subtitle_text_style.dart';
 import 'download_screen.dart';
@@ -175,6 +177,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// auto-fallback to the other engine ([DefaultEngine.allowFallback]).
   DefaultEngine _defaultEngine = DefaultEngine.auto;
   ToneMapMode _toneMapMode = ToneMapMode.sdr;
+  MpvInterpolationConfig _mpvInterpolation = const MpvInterpolationConfig();
   /// Cached from the first successful [_mpvGpuNextAvailable] probe on this
   /// player — drives the HDR badge (Native can show real DV/HDR only when
   /// libplacebo/gpu-next is present).
@@ -632,6 +635,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _shuffle = await PlaybackModesStore.loadShuffle();
         _defaultEngine = await DefaultEngineStore.load();
         _toneMapMode = await ToneMapStore.load();
+        _mpvInterpolation = await MpvInterpolationStore.load();
       } catch (_) {
         // Persistence unavailable; keep the defaults.
       }
@@ -1646,6 +1650,10 @@ Future<void> _offerVc1Mpv() async {
     // setProperty ignores mpv's return code, so try/catch alone cannot
     // detect a stock libmpv without libplacebo — set then get.
     await _applyMpvToneMap(player);
+    // Frame interpolation (issue #53). Applied after the VO is chosen: mpv's
+    // interpolation lives in the renderer, so it has to be configured against
+    // the VO that is actually in use.
+    await _applyMpvInterpolation(player);
 
     // Stock HDR→SDR extras (bt.2390 family) only when gpu-next is absent
     // — gpu-next path is fully configured in _applyMpvToneMap.
@@ -1892,6 +1900,105 @@ Future<void> _offerVc1Mpv() async {
       await platform.setProperty('target-colorspace-hint', 'yes');
       debugPrint('mpv: tone-map applied (native colorspace-hint)');
     }
+  }
+
+  /// Applies the user's frame-interpolation choice to libmpv (issue #53).
+  ///
+  /// mpv generates the frames that are missing between the source's own
+  /// frames, so 24 fps anime can be shown as 48 fps. Media3 cannot do this:
+  /// it hands decoded frames straight to the SurfaceView, so there is no
+  /// renderer in which an extra frame could be produced.
+  ///
+  /// The options are not obvious, and each one silently does nothing on its
+  /// own:
+  ///
+  ///  * `--interpolation` is ignored unless `--video-sync` is a `display-*`
+  ///    mode, so the sync mode is switched as well.
+  ///  * The frame rate interpolated *to* is the display frame rate, so the
+  ///    target goes in through `--display-fps-override` (renamed from
+  ///    `--display-fps`, which is a read-only property in the newer builds).
+  ///  * `--interpolation-threshold` (default 0.01) switches interpolation off
+  ///    when the two rates are within 1% of each other — a 47.94 fps source on
+  ///    a 48 fps target would then do nothing at all. -1 disables that logic.
+  Future<void> _applyMpvInterpolation(Player player) async {
+    final platform = player.platform;
+    if (platform is! NativePlayer || _inTests) return;
+    for (final option in mpvInterpolationOptions(_mpvInterpolation)) {
+      try {
+        await platform.setProperty(option.name, option.value);
+      } catch (e) {
+        debugPrint('mpv: ${option.name}=${option.value} unavailable: $e');
+      }
+    }
+    if (!_mpvInterpolation.enabled) {
+      await _setMpvDisplayFps(platform, 0);
+      debugPrint('mpv: frame interpolation off');
+      unawaited(_logMpvFpsEvidence(platform));
+      return;
+    }
+    final fpsApplied = await _setMpvDisplayFps(
+      platform,
+      _mpvInterpolation.targetFps,
+    );
+    debugPrint('mpv: frame interpolation on (target '
+        '${_mpvInterpolation.targetFps}fps, '
+        'tscale=${_mpvInterpolation.filter.mpvName}, '
+        'display-fps ${fpsApplied ? 'set' : 'NOT APPLIED'})');
+    unawaited(_logMpvFpsEvidence(platform));
+  }
+
+  /// Logs the frame rates mpv believes it is running at, so the interpolation
+  /// can be confirmed from a device log instead of by eye.
+  ///
+  /// `display-fps` is the rate the panel reports, `estimated-display-fps` the
+  /// rate mpv's display-sync actually settles on — and the latter only exists
+  /// once a display-sync mode is running, hence the delay. The option
+  /// properties are read back too: mpv accepts an option silently and can
+  /// still refuse to act on it, so "what mpv thinks it was told" is the only
+  /// honest answer.
+  Future<void> _logMpvFpsEvidence(NativePlayer platform) async {
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    for (final name in const [
+      'interpolation',
+      'video-sync',
+      'tscale',
+      'display-fps',
+      'estimated-display-fps',
+    ]) {
+      try {
+        final raw = await platform.getProperty(name);
+        debugPrint('mpv: $name = $raw');
+      } catch (e) {
+        debugPrint('mpv: $name unavailable: $e');
+      }
+    }
+  }
+
+  /// Sets the frame rate mpv treats as the display's, for the
+  /// `--video-sync=display-*` modes.
+  ///
+  /// mpv keeps the option value and the detected refresh rate apart: the
+  /// detected one is the read-only `display-fps` property and the option
+  /// value lives in `override-display-fps` — so a silent "set" on the wrong
+  /// name would be a lie. Every candidate is read back, and only counts when
+  /// mpv reports the frame rate that was asked for.
+  Future<bool> _setMpvDisplayFps(NativePlayer platform, int fps) async {
+    for (final name in mpvDisplayFpsOptionNames) {
+      try {
+        await platform.setProperty(name, '$fps');
+        final raw = await platform.getProperty(name);
+        final parsed = double.tryParse(raw.trim());
+        if (parsed != null && (parsed - fps).abs() < 0.01) {
+          debugPrint('mpv: display-fps override set via $name (raw="$raw")');
+          return true;
+        }
+        debugPrint('mpv: display-fps override via $name did not stick '
+            '(raw="$raw")');
+      } catch (e) {
+        debugPrint('mpv: display-fps override via $name failed: $e');
+      }
+    }
+    return false;
   }
 
   bool get _mpvAnime4kEligible {
@@ -5772,6 +5879,7 @@ if (mounted) setState(_applySwipeValue);
     bool expandSubtitleDelay = false;
     bool expandDecoder = false;
     bool expandToneMap = false;
+    bool expandInterpolation = false;
     bool expandBass = false;
     await showModalBottomSheet<void>(
       context: context,
@@ -6269,6 +6377,83 @@ if (mounted) setState(_applySwipeValue);
                                     await _applyMpvToneMap(player);
                                   }
                                   if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    const Divider(color: Colors.white12, height: 1),
+                    // Frame interpolation (issue #53) — libmpv only. Media3
+                    // renders decoded frames straight into the SurfaceView, so
+                    // there is no renderer that could produce the extra frames.
+                    _tvListTile(
+                      leading: const Icon(Icons.auto_awesome_motion, color: Colors.white70),
+                      title: Text(AppLocalizations.of(context).settingsMpvInterpolation, style: TextStyle(color: Colors.white)),
+                      subtitle: Text(
+                        _mpvInterpolation.enabled
+                            ? '${AppLocalizations.of(context).settingsMpvInterpolationFps(_mpvInterpolation.targetFps)} · ${switch (_mpvInterpolation.filter) {
+                                MpvInterpolationFilter.oversample => AppLocalizations.of(context).settingsMpvInterpolationQualitySharp,
+                                MpvInterpolationFilter.linear => AppLocalizations.of(context).settingsMpvInterpolationQualityBalanced,
+                                MpvInterpolationFilter.bicubic => AppLocalizations.of(context).settingsMpvInterpolationQualitySmooth,
+                              }}'
+                            : AppLocalizations.of(context).settingsMpvInterpolationOff,
+                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                      trailing: Icon(expandInterpolation ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
+                      onTap: () => setSheet(() => expandInterpolation = !expandInterpolation),
+                    ),
+                    if (expandInterpolation)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Column(
+                          children: [
+                            for (final fps in MpvInterpolationStore.targetFpsChoices)
+                              _tvListTile(
+                                leading: Icon(
+                                  _mpvInterpolation.targetFps == fps ? Icons.radio_button_checked : Icons.radio_button_off,
+                                  color: _mpvInterpolation.targetFps == fps ? Colors.white : Colors.white54,
+                                ),
+                                title: Text(
+                                  fps <= 0
+                                      ? AppLocalizations.of(context).settingsMpvInterpolationOff
+                                      : AppLocalizations.of(context).settingsMpvInterpolationFps(fps),
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                                onTap: () async {
+                                  if (_mpvInterpolation.targetFps == fps) return;
+                                  setState(() => _mpvInterpolation = _mpvInterpolation.copyWith(targetFps: fps));
+                                  setSheet(() {});
+                                  await MpvInterpolationStore.save(_mpvInterpolation);
+                                  final player = _mpvPlayer;
+                                  if (player != null) {
+                                    await _applyMpvInterpolation(player);
+                                  }
+                                },
+                              ),
+                            const Divider(color: Colors.white12, height: 1),
+                            for (final filter in MpvInterpolationFilter.values)
+                              _tvListTile(
+                                leading: Icon(
+                                  _mpvInterpolation.filter == filter ? Icons.radio_button_checked : Icons.radio_button_off,
+                                  color: _mpvInterpolation.filter == filter ? Colors.white : Colors.white54,
+                                ),
+                                title: Text(
+                                  switch (filter) {
+                                    MpvInterpolationFilter.oversample => AppLocalizations.of(context).settingsMpvInterpolationQualitySharp,
+                                    MpvInterpolationFilter.linear => AppLocalizations.of(context).settingsMpvInterpolationQualityBalanced,
+                                    MpvInterpolationFilter.bicubic => AppLocalizations.of(context).settingsMpvInterpolationQualitySmooth,
+                                  },
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                                onTap: () async {
+                                  if (_mpvInterpolation.filter == filter) return;
+                                  setState(() => _mpvInterpolation = _mpvInterpolation.copyWith(filter: filter));
+                                  setSheet(() {});
+                                  await MpvInterpolationStore.save(_mpvInterpolation);
+                                  final player = _mpvPlayer;
+                                  if (player != null) {
+                                    await _applyMpvInterpolation(player);
+                                  }
                                 },
                               ),
                           ],

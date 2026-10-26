@@ -806,6 +806,79 @@ A video player app supporting:
 - **Player overlay** shows HDR format + video/audio codec + resolution chips; library cards show an HDR badge + audio codec label.
   - **DV dedup**: for Dolby Vision the purple HDR chip already says "Dolby Vision", so the redundant video-codec chip is suppressed (no "Dolby Vision" twice).
   - **Chip layout**: landscape puts back button + title + chips in one `Wrap` on the same row; portrait shows title row, then chips `Wrap` below.
+### Frame interpolation for the MPV engine (issue #53) — read this before touching it
+
+**The feature**: Settings → Player → **"Frame interpolation (MPV)"** and the same
+section in the player's ⋮ sheet. Pick a target rate (Off / 30 / **48** / 60 /
+120) and a quality (Sharp = `oversample`, Balanced = `linear`, Smooth =
+`bicubic`). The ⋮ sheet applies it live; Settings applies it at the next open.
+Store: `lib/services/mpv_interpolation_store.dart` (prefs
+`dreamplayer.mpvInterpolationFps` / `…Filter`), pure option mapping in
+`lib/utils/mpv_interpolation.dart`, applied by `_applyMpvInterpolation`
+(`player_screen.dart`).
+
+**It is MPV-ONLY, and that is a product decision, not a missing feature.**
+Media3/ExoPlayer has **no interpolation API** — decoded frames go straight to
+the SurfaceView, so there is no renderer that could produce the extra frames.
+Making the native engine interpolate means writing a **custom GPU frame
+generator** (surface → GL/Vulkan → optical flow → present), which is exactly
+what **Mpv∞** (`ZHINFINITY/Mpv-infinity`) does:
+
+- **their MPV path**: a *custom mpv video filter* (`app/src/main/cpp/mpvflow/
+  vf_mpvflow.c` — "an independent, clean-room MEMC experiment with its own GPU
+  motion-estimation and synthesis pipeline"), with Vulkan / OpenCL / Qualcomm
+  backends and `target-fps` / `block-size` / `search-radius` options. Changing
+  the target needs a **restart transaction** (freeze → reconfigure+load →
+  restore) because the filter chain cannot be swapped live.
+- **their Media3 path**: `Media3FlowRenderersFactory` + `Media3FlowVideoSink`
+  (a custom Media3 `VideoSink` capturing frames via `SurfaceTexture` /
+  `HardwareBuffer`, running optical flow on the GPU, presenting through
+  `Media3FlowPresentationQueue`) plus `media3flow_vulkan_jni.cpp`. Their own
+  code carries `Media3FlowSdrOutputException` — **the native route is SDR-only**,
+  because frames no longer reach SurfaceFlinger as the decoder's native HDR
+  layer.
+
+**That last point is why we do not attempt it:** Media3 is our Dolby Vision /
+HDR engine, and routing it through a custom renderer would trade the headline
+feature (real HDR to the panel) for smoother 24 fps video — the same trade-off
+that put Anime4K out of scope. Their code is **PolyForm-Noncommercial 1.0.0**,
+so it cannot be copied either. What we ship is mpv's **stock** interpolation
+(frame blending, not optical flow): licence-clean, small, and enough for the
+"48/60 fps" feel the issue asked for.
+
+**The four traps in the mpv option recipe** (all four cost a build):
+
+1. **`--interpolation` is silently ignored unless `--video-sync` is a
+   `display-*` mode.** We set `video-sync=display-resample` with the feature on
+   and `video-sync=audio` with it off.
+2. **The frame rate interpolated *to* is the DISPLAY rate**, so the target goes
+   in through the display-fps override — and the property that carries the
+   *option* value is **`override-display-fps`**, not `display-fps`. mpv's
+   manual: "the reported value and the option value are cleanly separated
+   (`override-display-fps` for the option value)"; `display-fps` is the
+   **read-only** detected refresh rate. The user-facing option was renamed
+   `--display-fps` → `--display-fps-override` along the way, so
+   `mpvDisplayFpsOptionNames` tries `override-display-fps`,
+   `display-fps-override`, `display-fps` — in that order — and **reads each one
+   back** before it counts. Setting the wrong name is a silent no-op.
+3. **The read-back is a FLOAT**: mpv answers `"60.000000"`, so a string compare
+   against `"60"` reports "not applied" for a setting that *is* applied. Parse
+   it as a double and compare numerically.
+4. **`--interpolation-threshold` (default 0.01) switches interpolation off when
+   the source rate is within 1% of the target** — a 47.94 fps source on a 48 fps
+   target would do nothing at all. We set `-1` to disable that logic.
+
+**Verified on-device (OnePlus CPH2573, 2026-10-26):** Avengers Endgame
+2160p (source **23.976 fps**, `ffprobe` on the header) → the log shows
+`mpv: display-fps override set via override-display-fps (raw="60.000000")` and
+`mpv: frame interpolation on (target 60fps, tscale=oversample, display-fps set)`,
+and the SurfaceView's SurfaceFlinger buffer counter advances ~65 frames per
+1.11 s (~59 fps) against a 23.976 fps source — i.e. the frames are being
+synthesised, not duplicated. The user confirmed the difference by eye. The
+evidence lines (`mpv: interpolation = …`, `video-sync = …`, `tscale = …`,
+`display-fps = …`, `estimated-display-fps = …`) are printed after every change
+so the next "did it do anything?" is answered from the log.
+
 ### Settings → Metadata: one decision, not three rows
 
 The provider selector sits **at the top** and is drawn as **one outlined box

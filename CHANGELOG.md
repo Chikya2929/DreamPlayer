@@ -7,6 +7,14 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **Frame interpolation for the MPV engine (issue #53).** Settings → Player →
+  "Frame interpolation (MPV)" and the same section in the player's ⋮ sheet let
+  you pick a target frame rate (30 / 48 / 60 / 120) and a quality. A 24 fps
+  film is played back at 60 fps with blended in-between frames, so pans and
+  fast action stop looking choppy. It is an MPV feature: Media3 has no
+  interpolation API, and building one would mean routing the decoder through
+  our own GPU renderer — which would cost the Dolby Vision / HDR passthrough
+  that the native engine exists for.
 - **r18.dev as a metadata provider (issue #52).** No API key needed. It is
   keyed by the catalogue code in the file name — `SVFLA-012` and `SVFLA012`
   both resolve — and brings the poster, the cast, the release date, the

@@ -623,6 +623,52 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsMpvInterpolation": "Interpolación de fotogramas (MPV)",
+  "@settingsMpvInterpolation": {
+    "description": "libmpv frame interpolation picker label"
+  },
+  "settingsMpvInterpolationDesc": "Genera fotogramas extra para un movimiento más fluido",
+  "@settingsMpvInterpolationDesc": {
+    "description": "Frame interpolation subtitle"
+  },
+  "settingsMpvInterpolationOff": "Desactivada",
+  "@settingsMpvInterpolationOff": {
+    "description": "Frame interpolation off label"
+  },
+  "settingsMpvInterpolationTarget": "Fotogramas objetivo",
+  "@settingsMpvInterpolationTarget": {
+    "description": "Frame interpolation target frame rate header"
+  },
+  "settingsMpvInterpolationQuality": "Calidad de la interpolación",
+  "@settingsMpvInterpolationQuality": {
+    "description": "Frame interpolation quality header"
+  },
+  "settingsMpvInterpolationQualitySharp": "Nítida (SmoothMotion)",
+  "@settingsMpvInterpolationQualitySharp": {
+    "description": "Sharp interpolation filter label"
+  },
+  "settingsMpvInterpolationQualityBalanced": "Equilibrada",
+  "@settingsMpvInterpolationQualityBalanced": {
+    "description": "Balanced interpolation filter label"
+  },
+  "settingsMpvInterpolationQualitySmooth": "Suave",
+  "@settingsMpvInterpolationQualitySmooth": {
+    "description": "Smooth interpolation filter label"
+  },
+  "settingsMpvInterpolationFps": "{fps} fps",
+  "@settingsMpvInterpolationFps": {
+    "description": "Target frame rate value label",
+    "placeholders": {
+      "fps": {
+        "type": "int",
+        "example": "48"
+      }
+    }
+  },
+  "settingsMpvInterpolationNote": "Se aplica al motor MPV desde el siguiente vídeo. Media3 no puede interpolar fotogramas.",
+  "@settingsMpvInterpolationNote": {
+    "description": "Frame interpolation footnote"
+  },
   "settingsAutoPlayNext": "Auto-reproducir siguiente",
   "@settingsAutoPlayNext": {
     "description": "Auto-play toggle label"

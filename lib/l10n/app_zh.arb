@@ -623,6 +623,52 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsMpvInterpolation": "帧插值 (MPV)",
+  "@settingsMpvInterpolation": {
+    "description": "libmpv frame interpolation picker label"
+  },
+  "settingsMpvInterpolationDesc": "生成额外的帧，让画面运动更流畅",
+  "@settingsMpvInterpolationDesc": {
+    "description": "Frame interpolation subtitle"
+  },
+  "settingsMpvInterpolationOff": "关闭",
+  "@settingsMpvInterpolationOff": {
+    "description": "Frame interpolation off label"
+  },
+  "settingsMpvInterpolationTarget": "目标帧率",
+  "@settingsMpvInterpolationTarget": {
+    "description": "Frame interpolation target frame rate header"
+  },
+  "settingsMpvInterpolationQuality": "插值质量",
+  "@settingsMpvInterpolationQuality": {
+    "description": "Frame interpolation quality header"
+  },
+  "settingsMpvInterpolationQualitySharp": "锐利 (SmoothMotion)",
+  "@settingsMpvInterpolationQualitySharp": {
+    "description": "Sharp interpolation filter label"
+  },
+  "settingsMpvInterpolationQualityBalanced": "均衡",
+  "@settingsMpvInterpolationQualityBalanced": {
+    "description": "Balanced interpolation filter label"
+  },
+  "settingsMpvInterpolationQualitySmooth": "平滑",
+  "@settingsMpvInterpolationQualitySmooth": {
+    "description": "Smooth interpolation filter label"
+  },
+  "settingsMpvInterpolationFps": "{fps} fps",
+  "@settingsMpvInterpolationFps": {
+    "description": "Target frame rate value label",
+    "placeholders": {
+      "fps": {
+        "type": "int",
+        "example": "48"
+      }
+    }
+  },
+  "settingsMpvInterpolationNote": "从下一个视频开始应用于 MPV 引擎。Media3 无法插值。",
+  "@settingsMpvInterpolationNote": {
+    "description": "Frame interpolation footnote"
+  },
   "settingsAutoPlayNext": "自动播放下一集",
   "@settingsAutoPlayNext": {
     "description": "Auto-play toggle label"

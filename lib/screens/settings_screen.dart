@@ -30,6 +30,7 @@ import '../services/subtitle_languages.dart';
 import '../services/subtitle_prefs.dart';
 import '../services/support_links.dart';
 import '../services/mpv_downmix_store.dart';
+import '../services/mpv_interpolation_store.dart';
 import '../services/app_icon_service.dart';
 import '../services/app_updater.dart';
 import '../widgets/update_dialog.dart';
@@ -40,6 +41,7 @@ import '../services/tmdb_client.dart';
 import '../services/the_tvdb_client.dart';
 import '../services/watched_store.dart';
 import '../utils/tv_helper.dart';
+import '../utils/mpv_interpolation.dart';
 import '../widgets/tv_overscan.dart';
 import '../services/accent_store.dart';
 import '../services/layout_store.dart';
@@ -69,6 +71,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   DecoderMode _decoderMode = DecoderMode.auto;
   DefaultEngine _defaultEngine = DefaultEngine.ask;
   ToneMapMode _toneMapMode = ToneMapMode.sdr;
+  int _mpvInterpolationFps = 0;
+  MpvInterpolationFilter _mpvInterpolationFilter =
+      MpvInterpolationFilter.oversample;
   bool _volumeBoostEnabled = false;
   bool _nightMode = false;
   bool _simklConnected = false;
@@ -122,6 +127,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadDefaultEngine();
     unawaited(_loadOtherVideos());
     _loadToneMapMode();
+    _loadMpvInterpolation();
     _loadMpvDownmix();
     _loadAudioFilters();
     _loadSimkl();
@@ -281,6 +287,143 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final mode = await ToneMapStore.load();
       if (mounted) setState(() => _toneMapMode = mode);
     } catch (_) {}
+  }
+
+  Future<void> _loadMpvInterpolation() async {
+    try {
+      final cfg = await MpvInterpolationStore.load();
+      if (!mounted) return;
+      setState(() {
+        _mpvInterpolationFps = cfg.targetFps;
+        _mpvInterpolationFilter = cfg.filter;
+      });
+    } catch (_) {}
+  }
+
+  String _interpolationQualityLabel(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return switch (_mpvInterpolationFilter) {
+      MpvInterpolationFilter.oversample =>
+        l.settingsMpvInterpolationQualitySharp,
+      MpvInterpolationFilter.linear =>
+        l.settingsMpvInterpolationQualityBalanced,
+      MpvInterpolationFilter.bicubic =>
+        l.settingsMpvInterpolationQualitySmooth,
+    };
+  }
+
+  Future<void> _pickMpvInterpolation(BuildContext context) async {
+    var fps = _mpvInterpolationFps;
+    var filter = _mpvInterpolationFilter;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final l = AppLocalizations.of(ctx);
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            Future<void> save() async {
+              await MpvInterpolationStore.save(
+                MpvInterpolationConfig(targetFps: fps, filter: filter),
+              );
+              if (!mounted) return;
+              setState(() {
+                _mpvInterpolationFps = fps;
+                _mpvInterpolationFilter = filter;
+              });
+            }
+
+            return AlertDialog(
+              title: Text(l.settingsMpvInterpolation),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      l.settingsMpvInterpolationTarget,
+                      style: Theme.of(ctx).textTheme.labelLarge,
+                    ),
+                    RadioGroup<int>(
+                      groupValue: fps,
+                      onChanged: (v) async {
+                        if (v == null) return;
+                        fps = v;
+                        await save();
+                        setDialogState(() {});
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final choice
+                              in MpvInterpolationStore.targetFpsChoices)
+                            RadioListTile<int>(
+                              value: choice,
+                              dense: true,
+                              title: Text(
+                                choice <= 0
+                                    ? l.settingsMpvInterpolationOff
+                                    : l.settingsMpvInterpolationFps(choice),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 16),
+                    Text(
+                      l.settingsMpvInterpolationQuality,
+                      style: Theme.of(ctx).textTheme.labelLarge,
+                    ),
+                    RadioGroup<MpvInterpolationFilter>(
+                      groupValue: filter,
+                      onChanged: (v) async {
+                        if (v == null) return;
+                        filter = v;
+                        await save();
+                        setDialogState(() {});
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final choice in MpvInterpolationFilter.values)
+                            RadioListTile<MpvInterpolationFilter>(
+                              value: choice,
+                              dense: true,
+                              title: Text(
+                                switch (choice) {
+                                  MpvInterpolationFilter.oversample =>
+                                    l.settingsMpvInterpolationQualitySharp,
+                                  MpvInterpolationFilter.linear =>
+                                    l.settingsMpvInterpolationQualityBalanced,
+                                  MpvInterpolationFilter.bicubic =>
+                                    l.settingsMpvInterpolationQualitySmooth,
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l.settingsMpvInterpolationNote,
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Theme.of(ctx).hintColor),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(AppLocalizations.of(ctx).commonClose),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _pickLanguage({required bool isReading}) async {
@@ -1259,6 +1402,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         setState(() => _toneMapMode = picked);
                       }
                     },
+                  ),
+                if (defaultTargetPlatform == TargetPlatform.android &&
+                    _showMpvSettings)
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome_motion),
+                    title: Text(
+                      AppLocalizations.of(context).settingsMpvInterpolation,
+                    ),
+                    subtitle: Text(
+                      _mpvInterpolationFps <= 0
+                          ? AppLocalizations.of(context)
+                              .settingsMpvInterpolationOff
+                          : '${AppLocalizations.of(context).settingsMpvInterpolationFps(_mpvInterpolationFps)} · ${_interpolationQualityLabel(context)}',
+                    ),
+                    onTap: () => _pickMpvInterpolation(context),
                   ),
                 SwitchListTile(
                   secondary: const Icon(Icons.skip_next),

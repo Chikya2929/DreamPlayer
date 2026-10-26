@@ -1,11 +1,12 @@
 0.5.5
 
-New: a key-free film catalogue that matches by catalogue code, and a warning
-before you push the volume past 100% or the brightness past 80%.
+New: frame interpolation for the MPV engine (30/48/60/120 fps), a key-free
+film catalogue matched by code, and a warning before you push the volume or
+the brightness too far.
 
-Improved: the Get info and Fix match dialogs search the key-free catalogues,
-and a matched film keeps its own poster and synopsis.
+Improved: the Get info and Fix match dialogs search those catalogues, and a
+matched film keeps its own poster and synopsis.
 
-Fixed: the transport buttons in the player read previous chapter, back 10 s,
-play, forward 10 s, next. The Player settings section is back on Fire OS, so
-you can pick the playback engine on the stick.
+Fixed: the transport buttons read previous chapter, back 10 s, play, forward
+10 s, next. The Player settings section is back on Fire OS, so you can pick
+the engine on the stick.

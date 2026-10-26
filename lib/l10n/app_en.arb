@@ -631,6 +631,52 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsMpvInterpolation": "Frame interpolation (MPV)",
+  "@settingsMpvInterpolation": {
+    "description": "libmpv frame interpolation picker label"
+  },
+  "settingsMpvInterpolationDesc": "Generate extra frames for smoother motion",
+  "@settingsMpvInterpolationDesc": {
+    "description": "Frame interpolation subtitle"
+  },
+  "settingsMpvInterpolationOff": "Off",
+  "@settingsMpvInterpolationOff": {
+    "description": "Frame interpolation off label"
+  },
+  "settingsMpvInterpolationTarget": "Target frame rate",
+  "@settingsMpvInterpolationTarget": {
+    "description": "Frame interpolation target frame rate header"
+  },
+  "settingsMpvInterpolationQuality": "Interpolation quality",
+  "@settingsMpvInterpolationQuality": {
+    "description": "Frame interpolation quality header"
+  },
+  "settingsMpvInterpolationQualitySharp": "Sharp (SmoothMotion)",
+  "@settingsMpvInterpolationQualitySharp": {
+    "description": "Sharp interpolation filter label"
+  },
+  "settingsMpvInterpolationQualityBalanced": "Balanced",
+  "@settingsMpvInterpolationQualityBalanced": {
+    "description": "Balanced interpolation filter label"
+  },
+  "settingsMpvInterpolationQualitySmooth": "Smooth",
+  "@settingsMpvInterpolationQualitySmooth": {
+    "description": "Smooth interpolation filter label"
+  },
+  "settingsMpvInterpolationFps": "{fps} fps",
+  "@settingsMpvInterpolationFps": {
+    "description": "Target frame rate value label",
+    "placeholders": {
+      "fps": {
+        "type": "int",
+        "example": "48"
+      }
+    }
+  },
+  "settingsMpvInterpolationNote": "Applies to the MPV engine from the next video. Media3 cannot interpolate frames.",
+  "@settingsMpvInterpolationNote": {
+    "description": "Frame interpolation footnote"
+  },
   "settingsAutoPlayNext": "Auto-play next episode",
   "@settingsAutoPlayNext": {
     "description": "Auto-play toggle label"

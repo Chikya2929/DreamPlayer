@@ -623,6 +623,52 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsMpvInterpolation": "Интерполяция кадров (MPV)",
+  "@settingsMpvInterpolation": {
+    "description": "libmpv frame interpolation picker label"
+  },
+  "settingsMpvInterpolationDesc": "Создаёт дополнительные кадры для плавного движения",
+  "@settingsMpvInterpolationDesc": {
+    "description": "Frame interpolation subtitle"
+  },
+  "settingsMpvInterpolationOff": "Выключена",
+  "@settingsMpvInterpolationOff": {
+    "description": "Frame interpolation off label"
+  },
+  "settingsMpvInterpolationTarget": "Целевая частота кадров",
+  "@settingsMpvInterpolationTarget": {
+    "description": "Frame interpolation target frame rate header"
+  },
+  "settingsMpvInterpolationQuality": "Качество интерполяции",
+  "@settingsMpvInterpolationQuality": {
+    "description": "Frame interpolation quality header"
+  },
+  "settingsMpvInterpolationQualitySharp": "Резкая (SmoothMotion)",
+  "@settingsMpvInterpolationQualitySharp": {
+    "description": "Sharp interpolation filter label"
+  },
+  "settingsMpvInterpolationQualityBalanced": "Сбалансированная",
+  "@settingsMpvInterpolationQualityBalanced": {
+    "description": "Balanced interpolation filter label"
+  },
+  "settingsMpvInterpolationQualitySmooth": "Плавная",
+  "@settingsMpvInterpolationQualitySmooth": {
+    "description": "Smooth interpolation filter label"
+  },
+  "settingsMpvInterpolationFps": "{fps} fps",
+  "@settingsMpvInterpolationFps": {
+    "description": "Target frame rate value label",
+    "placeholders": {
+      "fps": {
+        "type": "int",
+        "example": "48"
+      }
+    }
+  },
+  "settingsMpvInterpolationNote": "Применяется к движку MPV со следующего видео. Media3 не умеет интерполировать кадры.",
+  "@settingsMpvInterpolationNote": {
+    "description": "Frame interpolation footnote"
+  },
   "settingsAutoPlayNext": "Авто-воспроизведение следующего",
   "@settingsAutoPlayNext": {
     "description": "Auto-play toggle label"

@@ -491,6 +491,40 @@ class AppLocalizationsRu extends AppLocalizations {
       'Передавать HDR-цветовое пространство на дисплей';
 
   @override
+  String get settingsMpvInterpolation => 'Интерполяция кадров (MPV)';
+
+  @override
+  String get settingsMpvInterpolationDesc =>
+      'Создаёт дополнительные кадры для плавного движения';
+
+  @override
+  String get settingsMpvInterpolationOff => 'Выключена';
+
+  @override
+  String get settingsMpvInterpolationTarget => 'Целевая частота кадров';
+
+  @override
+  String get settingsMpvInterpolationQuality => 'Качество интерполяции';
+
+  @override
+  String get settingsMpvInterpolationQualitySharp => 'Резкая (SmoothMotion)';
+
+  @override
+  String get settingsMpvInterpolationQualityBalanced => 'Сбалансированная';
+
+  @override
+  String get settingsMpvInterpolationQualitySmooth => 'Плавная';
+
+  @override
+  String settingsMpvInterpolationFps(int fps) {
+    return '$fps fps';
+  }
+
+  @override
+  String get settingsMpvInterpolationNote =>
+      'Применяется к движку MPV со следующего видео. Media3 не умеет интерполировать кадры.';
+
+  @override
   String get settingsAutoPlayNext => 'Авто-воспроизведение следующего';
 
   @override

@@ -1026,6 +1026,66 @@ abstract class AppLocalizations {
   /// **'Pass HDR colorspace through to the display'**
   String get settingsToneMapNativeDesc;
 
+  /// libmpv frame interpolation picker label
+  ///
+  /// In en, this message translates to:
+  /// **'Frame interpolation (MPV)'**
+  String get settingsMpvInterpolation;
+
+  /// Frame interpolation subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Generate extra frames for smoother motion'**
+  String get settingsMpvInterpolationDesc;
+
+  /// Frame interpolation off label
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get settingsMpvInterpolationOff;
+
+  /// Frame interpolation target frame rate header
+  ///
+  /// In en, this message translates to:
+  /// **'Target frame rate'**
+  String get settingsMpvInterpolationTarget;
+
+  /// Frame interpolation quality header
+  ///
+  /// In en, this message translates to:
+  /// **'Interpolation quality'**
+  String get settingsMpvInterpolationQuality;
+
+  /// Sharp interpolation filter label
+  ///
+  /// In en, this message translates to:
+  /// **'Sharp (SmoothMotion)'**
+  String get settingsMpvInterpolationQualitySharp;
+
+  /// Balanced interpolation filter label
+  ///
+  /// In en, this message translates to:
+  /// **'Balanced'**
+  String get settingsMpvInterpolationQualityBalanced;
+
+  /// Smooth interpolation filter label
+  ///
+  /// In en, this message translates to:
+  /// **'Smooth'**
+  String get settingsMpvInterpolationQualitySmooth;
+
+  /// Target frame rate value label
+  ///
+  /// In en, this message translates to:
+  /// **'{fps} fps'**
+  String settingsMpvInterpolationFps(int fps);
+
+  /// Frame interpolation footnote
+  ///
+  /// In en, this message translates to:
+  /// **'Applies to the MPV engine from the next video. Media3 cannot interpolate frames.'**
+  String get settingsMpvInterpolationNote;
+
   /// Auto-play toggle label
   ///
   /// In en, this message translates to:

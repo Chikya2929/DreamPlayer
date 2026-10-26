@@ -491,6 +491,40 @@ class AppLocalizationsEs extends AppLocalizations {
       'Pasar el colorspace HDR a la pantalla';
 
   @override
+  String get settingsMpvInterpolation => 'Interpolación de fotogramas (MPV)';
+
+  @override
+  String get settingsMpvInterpolationDesc =>
+      'Genera fotogramas extra para un movimiento más fluido';
+
+  @override
+  String get settingsMpvInterpolationOff => 'Desactivada';
+
+  @override
+  String get settingsMpvInterpolationTarget => 'Fotogramas objetivo';
+
+  @override
+  String get settingsMpvInterpolationQuality => 'Calidad de la interpolación';
+
+  @override
+  String get settingsMpvInterpolationQualitySharp => 'Nítida (SmoothMotion)';
+
+  @override
+  String get settingsMpvInterpolationQualityBalanced => 'Equilibrada';
+
+  @override
+  String get settingsMpvInterpolationQualitySmooth => 'Suave';
+
+  @override
+  String settingsMpvInterpolationFps(int fps) {
+    return '$fps fps';
+  }
+
+  @override
+  String get settingsMpvInterpolationNote =>
+      'Se aplica al motor MPV desde el siguiente vídeo. Media3 no puede interpolar fotogramas.';
+
+  @override
   String get settingsAutoPlayNext => 'Auto-reproducir siguiente';
 
   @override

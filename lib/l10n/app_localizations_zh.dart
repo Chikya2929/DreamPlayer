@@ -488,6 +488,38 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsToneMapNativeDesc => '将 HDR 色彩空间直通到显示器';
 
   @override
+  String get settingsMpvInterpolation => '帧插值 (MPV)';
+
+  @override
+  String get settingsMpvInterpolationDesc => '生成额外的帧，让画面运动更流畅';
+
+  @override
+  String get settingsMpvInterpolationOff => '关闭';
+
+  @override
+  String get settingsMpvInterpolationTarget => '目标帧率';
+
+  @override
+  String get settingsMpvInterpolationQuality => '插值质量';
+
+  @override
+  String get settingsMpvInterpolationQualitySharp => '锐利 (SmoothMotion)';
+
+  @override
+  String get settingsMpvInterpolationQualityBalanced => '均衡';
+
+  @override
+  String get settingsMpvInterpolationQualitySmooth => '平滑';
+
+  @override
+  String settingsMpvInterpolationFps(int fps) {
+    return '$fps fps';
+  }
+
+  @override
+  String get settingsMpvInterpolationNote => '从下一个视频开始应用于 MPV 引擎。Media3 无法插值。';
+
+  @override
   String get settingsAutoPlayNext => '自动播放下一集';
 
   @override

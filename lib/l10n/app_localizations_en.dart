@@ -489,6 +489,40 @@ class AppLocalizationsEn extends AppLocalizations {
       'Pass HDR colorspace through to the display';
 
   @override
+  String get settingsMpvInterpolation => 'Frame interpolation (MPV)';
+
+  @override
+  String get settingsMpvInterpolationDesc =>
+      'Generate extra frames for smoother motion';
+
+  @override
+  String get settingsMpvInterpolationOff => 'Off';
+
+  @override
+  String get settingsMpvInterpolationTarget => 'Target frame rate';
+
+  @override
+  String get settingsMpvInterpolationQuality => 'Interpolation quality';
+
+  @override
+  String get settingsMpvInterpolationQualitySharp => 'Sharp (SmoothMotion)';
+
+  @override
+  String get settingsMpvInterpolationQualityBalanced => 'Balanced';
+
+  @override
+  String get settingsMpvInterpolationQualitySmooth => 'Smooth';
+
+  @override
+  String settingsMpvInterpolationFps(int fps) {
+    return '$fps fps';
+  }
+
+  @override
+  String get settingsMpvInterpolationNote =>
+      'Applies to the MPV engine from the next video. Media3 cannot interpolate frames.';
+
+  @override
   String get settingsAutoPlayNext => 'Auto-play next episode';
 
   @override
