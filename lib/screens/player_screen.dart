@@ -3426,7 +3426,6 @@ Future<void> _offerVc1Mpv() async {
       videoMime: _liveVideoMimeRaw,
       isHdr10Plus: e.isHdr10Plus,
       isHdr10: e.isHdr10,
-      dvBaseLayer: e.dvBaseLayer,
     );
     // Don't regress a known Dolby Vision / HDR state to SDR when the
     // native event arrives without codec/transfer (common on the first

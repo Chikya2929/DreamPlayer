@@ -293,14 +293,8 @@ HdrFormat detectMedia3HdrFormat({
   String? videoMime,
   bool isHdr10Plus = false,
   bool isHdr10 = false,
-  bool dvBaseLayer = false,
 }) {
   if (isDolbyVisionCodec(videoCodecs) || isDolbyVisionCodec(videoMime)) {
-    // The track is Dolby Vision, but the decoder that is actually running is
-    // a plain HEVC decoder: the HEVC base layer is playing, which is HDR10
-    // WITHOUT the Dolby Vision metadata. Labelling it "Dolby Vision" would
-    // claim a picture the device is not showing.
-    if (dvBaseLayer) return HdrFormat.hdr10;
     return HdrFormat.dolbyVision;
   }
   // ST 2094-40 dynamic metadata found in the bitstream → HDR10+, even though

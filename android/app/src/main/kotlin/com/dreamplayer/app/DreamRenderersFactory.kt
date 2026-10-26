@@ -14,14 +14,7 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.util.ArrayList
 
-class DreamRenderersFactory(
-    context: Context,
-    /// Optional observer for video-renderer events (first rendered frame,
-    /// decoder init). The factory owns the only [VideoRendererEventListener]
-    /// Media3 hands to the renderers, so anything that needs those callbacks
-    /// has to be plugged in here.
-    private val videoObserver: VideoRendererEventListener? = null,
-) : DefaultRenderersFactory(context) {
+class DreamRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
     init {
         setAllowedVideoJoiningTimeMs(0L)
     }
@@ -62,14 +55,13 @@ class DreamRenderersFactory(
         allowedJoiningTimeMs: Long,
         out: ArrayList<Renderer>,
     ) {
-        val observer = videoObserver
         super.buildVideoRenderers(
             context,
             extensionRendererMode,
             codecSelector,
             enableDecoderFallback,
             eventHandler,
-            if (observer == null) eventListener else ObservedVideoListener(eventListener, observer),
+            eventListener,
             allowedJoiningTimeMs,
             out,
         )
@@ -111,37 +103,6 @@ class DreamRenderersFactory(
             Log.i("DreamRenderersFactory", "Loaded FfmpegAudioRenderer.")
         } catch (e: Exception) {
             Log.w("DreamRenderersFactory", "FfmpegAudioRenderer unavailable, falling back to MediaCodec only.", e)
-        }
-    }
-
-    /// Forwards every video-renderer event to Media3's own listener and to our
-    /// observer. Kotlin's interface delegation keeps the default methods of
-    /// [VideoRendererEventListener] intact.
-    private class ObservedVideoListener(
-        private val delegate: VideoRendererEventListener,
-        private val observer: VideoRendererEventListener,
-    ) : VideoRendererEventListener by delegate {
-        override fun onVideoDecoderInitialized(
-            codecName: String,
-            initializationDurationMs: Long,
-            initializationLatencyMs: Long,
-        ) {
-            delegate.onVideoDecoderInitialized(codecName, initializationDurationMs, initializationLatencyMs)
-            observer.onVideoDecoderInitialized(codecName, initializationDurationMs, initializationLatencyMs)
-        }
-
-        // Media3 1.10.1 signature: onRenderedFirstFrame(Object output, long renderTimeMs).
-        override fun onRenderedFirstFrame(output: Any, renderTimeMs: Long) {
-            delegate.onRenderedFirstFrame(output, renderTimeMs)
-            observer.onRenderedFirstFrame(output, renderTimeMs)
-        }
-
-        override fun onVideoInputFormatChanged(
-            format: androidx.media3.common.Format,
-            decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?,
-        ) {
-            delegate.onVideoInputFormatChanged(format, decoderReuseEvaluation)
-            observer.onVideoInputFormatChanged(format, decoderReuseEvaluation)
         }
     }
 }
