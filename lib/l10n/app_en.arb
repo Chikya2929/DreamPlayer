@@ -2107,7 +2107,7 @@
   "@playerVolumeBoostWarning": {
     "description": "Warning shown when the volume gesture crosses above 100% into boost"
   },
-  "playerBrightnessBatteryWarning": "Full brightness drains the battery faster",
+  "playerBrightnessBatteryWarning": "Brightness above 80% drains the battery faster",
   "@playerBrightnessBatteryWarning": {
     "description": "Warning shown when the brightness gesture reaches full brightness"
   },

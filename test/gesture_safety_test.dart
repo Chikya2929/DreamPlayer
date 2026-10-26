@@ -45,30 +45,37 @@ void main() {
       );
     });
 
-    test('brightness reaching full warns', () {
+    test('brightness reaching 80% warns', () {
       expect(
-        gestureSafetyWarning(isVolume: false, previous: 0.6, next: 1.0),
-        GestureSafetyWarning.brightnessFull,
+        gestureSafetyWarning(isVolume: false, previous: 0.6, next: 0.8),
+        GestureSafetyWarning.brightnessHigh,
       );
     });
 
-    test('brightness below full does not warn', () {
+    test('brightness crossing above 80% warns', () {
       expect(
-        gestureSafetyWarning(isVolume: false, previous: 0.4, next: 0.95),
+        gestureSafetyWarning(isVolume: false, previous: 0.79, next: 0.9),
+        GestureSafetyWarning.brightnessHigh,
+      );
+    });
+
+    test('brightness below 80% does not warn', () {
+      expect(
+        gestureSafetyWarning(isVolume: false, previous: 0.4, next: 0.79),
         GestureSafetyWarning.none,
       );
     });
 
-    test('brightness already full does not re-warn', () {
+    test('brightness already at 80% does not re-warn', () {
       expect(
-        gestureSafetyWarning(isVolume: false, previous: 1.0, next: 1.0),
+        gestureSafetyWarning(isVolume: false, previous: 0.8, next: 0.9),
         GestureSafetyWarning.none,
       );
     });
 
     test('brightness dropping does not warn', () {
       expect(
-        gestureSafetyWarning(isVolume: false, previous: 1.0, next: 0.5),
+        gestureSafetyWarning(isVolume: false, previous: 0.9, next: 0.5),
         GestureSafetyWarning.none,
       );
     });

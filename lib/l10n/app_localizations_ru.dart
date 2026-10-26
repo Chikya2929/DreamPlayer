@@ -1613,7 +1613,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get playerBrightnessBatteryWarning =>
-      'Максимальная яркость быстрее разряжает батарею';
+      'Яркость выше 80 % быстрее разряжает батарею';
 
   @override
   String get playerDownloaded => 'Загружено';

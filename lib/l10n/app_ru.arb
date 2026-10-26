@@ -2007,7 +2007,7 @@
   "@playerVolumeBoostWarning": {
     "description": "Translated key"
   },
-  "playerBrightnessBatteryWarning": "Максимальная яркость быстрее разряжает батарею",
+  "playerBrightnessBatteryWarning": "Яркость выше 80 % быстрее разряжает батарею",
   "@playerBrightnessBatteryWarning": {
     "description": "Translated key"
   },

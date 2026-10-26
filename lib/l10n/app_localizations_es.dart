@@ -1615,7 +1615,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get playerBrightnessBatteryWarning =>
-      'El brillo al máximo agota la batería más rápido';
+      'Un brillo superior al 80 % agota la batería más rápido';
 
   @override
   String get playerDownloaded => 'Descargado';

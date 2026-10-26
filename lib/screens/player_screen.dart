@@ -4352,7 +4352,7 @@ if (mounted) setState(_applySwipeValue);
     final message = switch (warning) {
       GestureSafetyWarning.volumeAboveNormal =>
         l10n.playerVolumeBoostWarning,
-      GestureSafetyWarning.brightnessFull =>
+      GestureSafetyWarning.brightnessHigh =>
         l10n.playerBrightnessBatteryWarning,
       GestureSafetyWarning.none => null,
     };

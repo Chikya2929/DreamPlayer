@@ -16,15 +16,15 @@ enum GestureSafetyWarning {
   /// The volume crossed above 100% into the boost band.
   volumeAboveNormal,
 
-  /// The brightness reached the top of its range.
-  brightnessFull,
+  /// The brightness reached the warning level (80%).
+  brightnessHigh,
 }
 
 /// The gesture value where the volume leaves the system-volume range.
 const double kVolumeNormalCeiling = 1.0;
 
-/// The gesture value that counts as full brightness.
-const double kBrightnessFullLevel = 1.0;
+/// The brightness level from which the battery warning fires (80%).
+const double kBrightnessWarningLevel = 0.8;
 
 /// Which safety warning (if any) a gesture step triggers.
 ///
@@ -36,8 +36,10 @@ const double kBrightnessFullLevel = 1.0;
 /// comparison is strict, so a gesture that tops out exactly at 100% (the
 /// system maximum, no boost) stays silent.
 ///
-/// Brightness tops out at 100%, so there is no band above it: "increased"
-/// means it reached the top of the range.
+/// Brightness warns from [kBrightnessWarningLevel] (80%) upwards, because a
+/// bright panel is what drains the battery — there is no "boost band" to
+/// cross, just a level the user should know about. The comparison is
+/// inclusive there: reaching exactly 80% already counts.
 GestureSafetyWarning gestureSafetyWarning({
   required bool isVolume,
   required double previous,
@@ -49,8 +51,9 @@ GestureSafetyWarning gestureSafetyWarning({
     }
     return GestureSafetyWarning.none;
   }
-  if (previous < kBrightnessFullLevel && next >= kBrightnessFullLevel) {
-    return GestureSafetyWarning.brightnessFull;
+  if (previous < kBrightnessWarningLevel &&
+      next >= kBrightnessWarningLevel) {
+    return GestureSafetyWarning.brightnessHigh;
   }
   return GestureSafetyWarning.none;
 }

@@ -2007,7 +2007,7 @@
   "@playerVolumeBoostWarning": {
     "description": "Translated key"
   },
-  "playerBrightnessBatteryWarning": "El brillo al máximo agota la batería más rápido",
+  "playerBrightnessBatteryWarning": "Un brillo superior al 80 % agota la batería más rápido",
   "@playerBrightnessBatteryWarning": {
     "description": "Translated key"
   },

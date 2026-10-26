@@ -3129,7 +3129,7 @@ abstract class AppLocalizations {
   /// Warning shown when the brightness gesture reaches full brightness
   ///
   /// In en, this message translates to:
-  /// **'Full brightness drains the battery faster'**
+  /// **'Brightness above 80% drains the battery faster'**
   String get playerBrightnessBatteryWarning;
 
   /// Downloaded status label
