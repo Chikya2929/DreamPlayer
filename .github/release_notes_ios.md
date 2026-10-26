@@ -35,6 +35,29 @@ true of the intended build but not of the one that was reviewed. Verify with
 
 ---
 
+## Next release
+
+*(Unreleased. This section is rewritten with the version number when the build
+is cut, and it lists only what iPhone and iPad users get.)*
+
+New:
+• Pushing the screen brightness past 80% now flashes a short warning that it
+  drains the battery faster, the first time you cross that point.
+
+• Another key-free film catalogue is available in Settings → Metadata. It
+  matches a film by its catalogue code — SVFLA-012 and SVFLA012 are the same
+  film — and brings the poster, cast, release date, studio and genres.
+
+Fixed:
+• The Get info and Fix match dialogs now search the key-free catalogues
+  alongside the others, so a film can be matched even without a key for the
+  catalogues that need one.
+• A film matched through one of those catalogues keeps its own details. The
+  poster and synopsis could previously be fetched from a different catalogue
+  and show an unrelated film.
+
+---
+
 ## 0.5.4
 
 New:

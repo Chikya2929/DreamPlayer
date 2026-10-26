@@ -12,8 +12,33 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   both resolve — and brings the poster, the cast, the release date, the
   studio, the genres and the sample-video frames. Enable it in
   Settings → Metadata.
+- **A short warning before you push the volume or the brightness too far.**
+  Swiping the volume past 100% now flashes "Above 100% can damage your
+  speakers — use at your own risk", and swiping the brightness past 80%
+  flashes "Brightness above 80% drains the battery faster". Each warning
+  appears once, at the moment you cross the line, and never blocks playback.
+
+### Changed
+
+- **The centre transport buttons now read left to right the way they do
+  everywhere else.** The cluster is previous chapter · back 10 s ·
+  play/pause · forward 10 s · next chapter; before, the chapter skip sat
+  *inside* the ±10 s pair, which made the two look like one group. The ±10 s
+  buttons stay TV-only (a phone has the double-tap-to-seek gesture), so on a
+  phone the cluster is previous · play · next.
 
 ### Fixed
+
+- **Dolby Vision played as a black picture on some TV boxes.** On certain
+  Fire TV devices the Dolby Vision decoder accepted the stream but never
+  rendered a frame: the picture stayed black, the audio played fine, and no
+  error was reported — the format chip even said "Dolby Vision". The player
+  now watches for the first video frame and, if none arrives, restarts the
+  file through the standard HDR10 base layer of the very same stream, so it
+  plays as HDR10 instead of staying black. The decision is remembered per
+  Dolby Vision profile, so the same file goes straight to the working path
+  next time, and the format chip reports HDR10 rather than claiming Dolby
+  Vision it is not delivering.
 
 - **Volume boost no longer loses the dialogue on 5.1/7.1 tracks (issue #41).**
   Above 100% boost on some devices the background music kept playing while

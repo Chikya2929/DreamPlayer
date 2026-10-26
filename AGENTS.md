@@ -298,6 +298,56 @@ A video player app supporting:
   HDR→SDR tone mapping (washed-out colors). `Display.isHdrSupported` is API 34;
   use `hdrCapabilities?.supportedHdrTypes?.isNotEmpty() != true` (API 24+), and
   note `HdrCapabilities` has no `isHdrSupported` in the android-37 stub.
+- **Dolby Vision BLACK PICTURE on the Fire TV Stick (2026-10-26) — the first-frame
+  watchdog.** The stick (Fire OS 7.1, API 25) plays a DV profile 8 remux with a
+  **black picture and working audio, and NO error** — the "Dolby Vision" chip is
+  shown, the panel stays dark. **Root cause**: the device's MediaTek DV decoder
+  (`OMX.MTK.VIDEO.DECODER.DVHE.STH`) ACCEPTS the stream, initializes, and then
+  renders nothing. Media3 never notices: it takes the **first** decoder the
+  `MediaCodecSelector` returns, creates the codec from it and never re-checks it
+  (`enableDecoderFallback` only covers *init* failures, and a post-init
+  `isFormatSupported` miss is only a log warning). A decoder can therefore claim
+  support and stay mute — **only watching for the first frame can catch it.**
+  **Fix (native, Kotlin):** `ExoPlayerView` watches the video renderer through
+  `DreamRenderersFactory`'s observer (`VideoRendererEventListener`) — if a DV
+  track has an initialized decoder, a READY player and **no rendered frame after
+  12 s**, the track is re-opened through the **HEVC base layer** (HDR10 instead of
+  Dolby Vision) at the same position: `PlayerCodecs.forceHevcBaseLayer = true`
+  → `player.stop(); prepare(); seekTo(pos); play()`. One retry per open
+  (`dvHevcRetryDone` latch).
+    - **The base-layer path is Media3's OWN**, not a hack: the HEVC decoder is
+      configured with **its own mime type** (`MediaCodecVideoRenderer
+      .getMediaFormat` sets `KEY_MIME = codecInfo.codecMimeType`), so it decodes
+      the HEVC base layer of the DV stream, and for an MKV the CSD is the
+      `hvcC` record (MatroskaExtractor keeps the HEVC config data and only
+      swaps the mime type + codecs string when it sees a DV config block).
+      Media3 uses the same path on any device whose display has no Dolby Vision
+      support (`getDecoderInfos`: DV + `SDK_INT >= 26` + display without DV →
+      the alternative-mime decoders only).
+    - **Media3 1.11.1 does NOT fix this** (checked upstream): the DV internals
+      are identical to 1.10.1 (only `isVideoSizeAndRateSupportedV21` was
+      renamed). **No version bump.**
+    - **Remembered per profile**: the decision is stored in its OWN prefs file
+      (`dreamplayer_dv`, keyed by the codecs string e.g. `dvhe.08.06`) so the
+      next open of that file goes straight to the base layer instead of showing
+      12 s of black again — and so ONE broken DV profile does not drag every
+      other DV profile down with it. The native side never writes into
+      `FlutterSharedPreferences` (Flutter's plugin owns it).
+    - **The chip must stay honest**: `stateMap()` emits `dvBaseLayer` (the track
+      is DV but the decoder in use is NOT a DV decoder) and Dart's
+      `detectMedia3HdrFormat` then reports **HDR10**, not Dolby Vision — the
+      picture really is the HDR10 base layer.
+    - **Traps**: (1) Media3 **1.10.1**'s `VideoRendererEventListener
+      .onRenderedFirstFrame` takes **(Object output, long renderTimeMs)** — not
+      the no-arg shape of older versions; (2) `DefaultRenderersFactory` has NO
+      `setVideoRendererEventListener` — the listener arrives as a BUILD
+      parameter, so the observer is plugged in by wrapping the listener inside
+      `buildVideoRenderers`; (3) the renderer events arrive on Media3's event
+      handler, so every player interaction is posted back to the app's main
+      `Handler` (ExoPlayer is single-threaded); (4) `player.stop()` kills the
+      media notification for a moment (`PlaybackManager.sync` restarts the
+      foreground service on the next READY — the `servicePending`/`pendingStop`
+      handshake already exists for exactly this).
 
 - **iOS/iPad playback via AetherEngine (2026-08)** — the raw **AVPlayer**
   platform view was swapped for an **AetherEngine**-backed one
@@ -1569,6 +1619,17 @@ deliberately scoped:
   because the pill is already the big-transport cluster and a viewer skipping
   an opening is looking at the video. Shown only when `_chapters.length > 1`,
   on phone, tablet and TV alike. Gated on `_inPip` like every other control.
+- **The transport row has ONE order, and the chapter arrows bracket the ±10 s
+  pair** (user request, 2026-10-26): **previous chapter · back 10 s ·
+  play/pause · forward 10 s · next chapter.** It used to be `back 10 s ·
+  previous chapter · play · forward 10 s · next`, which put the chapter skip
+  *inside* the ±10 s pair and read as if the two were one group. The ±10 s
+  buttons stay **TV-only** (a phone has the double-tap-to-seek gesture
+  instead), so on a phone the row is previous · play · next. The order is
+  pinned by `test/player_transport_order_test.dart`, which reads the cluster
+  out of `player_screen.dart` and asserts the five markers appear in
+  sequence — the player screen needs a live platform view, so the row cannot
+  be pumped as a widget.
 - **The gesture is a DOUBLE-TAP on the bar, deliberately not the horizontal
   swipe.** That swipe is ±90 s scrub (`±90 s per screen width`); silently
   changing what it means would break it for every video with no chapters.
