@@ -279,6 +279,7 @@ class ExoPlayerEvent {
     this.colorTransfer,
     this.isHdr10Plus = false,
     this.isHdr10 = false,
+    this.dvBaseLayer = false,
     this.audioCodecs,
     this.audioMime,
     this.audioChannels = 0,
@@ -329,6 +330,12 @@ class ExoPlayerEvent {
   /// `Format.colorInfo`, so this bitstream probe restores the correct
   /// HDR10 label and engages the headroom path.
   final bool isHdr10;
+
+  /// True when the video track is Dolby Vision but the decoder that is
+  /// actually running is a plain HEVC decoder: the HEVC base layer is
+  /// playing, so the picture is HDR10 (no Dolby Vision metadata) even though
+  /// the track still reports `dvhe.*`.
+  final bool dvBaseLayer;
   final String? audioCodecs;
   final String? audioMime;
   final int audioChannels;
@@ -415,6 +422,7 @@ class ExoPlayerEvent {
           : null,
       isHdr10Plus: m['isHdr10Plus'] == true,
       isHdr10: m['isHdr10'] == true,
+      dvBaseLayer: m['dvBaseLayer'] == true,
       audioCodecs: m['audioCodecs'] as String?,
       audioMime: m['audioMime'] as String?,
       audioChannels: asInt(m['audioChannels']),

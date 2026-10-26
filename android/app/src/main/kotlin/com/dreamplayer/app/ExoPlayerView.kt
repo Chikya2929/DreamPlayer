@@ -118,7 +118,7 @@ class ExoPlayerView(
         PlayerCodecs.passthroughEnabled(activity)
 
     private val mediaCodecSelector: MediaCodecSelector =
-        PlayerCodecs.mediaCodecSelector(activity)
+        PlayerCodecs.mediaCodecSelector(activity, ::currentVideoFormat)
 
     // ---- Volume Boost + Night Mode ------------------------------------------
     /// Boost goes through PCM gain + peak limiter inside the audio sink, on
@@ -477,13 +477,140 @@ class ExoPlayerView(
     /// [open] can recreate it when the user switches modes.
     private var lastDecoderMode: String = PlayerCodecs.decoderMode(activity)
 
+    // ---- Dolby Vision black-picture watchdog ------------------------------
+    //
+    // Some devices advertise a `video/dolby-vision` decoder that INITIALIZES
+    // fine but never renders a frame: the picture stays black while the audio
+    // plays and Media3 reports no error at all. That is the Fire TV Stick's
+    // failure mode with DV profile 8 remuxes (the decoder accepts the stream,
+    // the panel stays dark).
+    //
+    // The codec selector already prefers a DV decoder that can really decode
+    // the track, but a decoder can CLAIM support and still render nothing —
+    // and only watching for the first frame can catch that. When the picture
+    // stays black this long after the decoder came up, the track is re-opened
+    // through the HEVC base layer (HDR10 instead of Dolby Vision), which is
+    // exactly what Media3 itself does on a device whose display has no Dolby
+    // Vision support.
+    private val handler = Handler(Looper.getMainLooper())
+
+    /// True while the video track being rendered is a Dolby Vision track.
+    @Volatile private var dvInputFormat = false
+
+    /// True once the video decoder for the current track has been initialized.
+    @Volatile private var videoDecoderInitialized = false
+
+    /// True once the video renderer has rendered its first frame.
+    @Volatile private var videoFirstFrameRendered = false
+
+    /// Latch: only ONE base-layer retry per open.
+    private var dvHevcRetryDone = false
+
+    /// The format the video renderer is currently consuming. Kept because
+    /// `player.videoFormat` can be null while the renderer already knows the
+    /// format (and the codec selector needs it).
+    @Volatile private var rendererVideoFormat: Format? = null
+
+    /// The format of the video track that is currently selected. The codec
+    /// selector uses it to decide whether the device's Dolby Vision decoder
+    /// can really decode THIS file (profile / level / resolution).
+    private fun currentVideoFormat(): Format? =
+        player.videoFormat ?: rendererVideoFormat
+
+    /// Watches for a black picture on a Dolby Vision track and switches the
+    /// playback over to the HEVC base layer when the DV decoder stays mute.
+    private val dvNoFrameWatchdog: Runnable = Runnable {
+        if (disposed || dvHevcRetryDone) return@Runnable
+        if (videoFirstFrameRendered) return@Runnable
+        val format = player.videoFormat ?: rendererVideoFormat
+        if (format?.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return@Runnable
+        if (!videoDecoderInitialized || player.playbackState != Player.STATE_READY) {
+            // The player is stopped (e.g. the Dolby Vision Profile 5
+            // rejection stops it) — there is nothing left to watch.
+            if (player.playbackState == Player.STATE_IDLE) return@Runnable
+            // The decoder is not up yet (slow source) — keep waiting.
+            armDvNoFrameWatchdog()
+            return@Runnable
+        }
+        dvHevcRetryDone = true
+        handler.removeCallbacks(dvNoFrameWatchdog)
+        val positionMs = player.currentPosition
+        val codecs = format.codecs
+        PlayerCodecs.forceHevcBaseLayer = true
+        // Remember it: the next open of the same file goes straight to the
+        // base layer instead of showing a black picture for 12 seconds first.
+        PlayerCodecs.setDvFallback(activity, codecs, true)
+        Log.w(
+            "ExoPlayerView",
+            "Dolby Vision ($codecs) rendered no frame within ${DV_NO_FRAME_TIMEOUT_MS}ms - " +
+                "retrying with the HEVC base layer at ${positionMs}ms",
+        )
+        player.stop()
+        player.prepare()
+        player.seekTo(positionMs)
+        player.play()
+    }
+
+    /// (Re)starts the black-picture watchdog.
+    private fun armDvNoFrameWatchdog() {
+        if (disposed || dvHevcRetryDone) return
+        handler.removeCallbacks(dvNoFrameWatchdog)
+        handler.postDelayed(dvNoFrameWatchdog, DV_NO_FRAME_TIMEOUT_MS)
+    }
+
+    /// Watches the video renderer for the two events the black-picture
+    /// watchdog needs: the decoder coming up and the first frame being
+    /// rendered. Media3 hands its own listener to the renderers, so the
+    /// observer is plugged in through [DreamRenderersFactory].
+    private val videoObserver = object : androidx.media3.exoplayer.video.VideoRendererEventListener {
+        override fun onVideoDecoderInitialized(
+            codecName: String,
+            initializationDurationMs: Long,
+            initializationLatencyMs: Long,
+        ) {
+            handler.post {
+                videoDecoderInitialized = true
+                if (dvInputFormat) armDvNoFrameWatchdog()
+            }
+        }
+
+        override fun onRenderedFirstFrame(output: Any, renderTimeMs: Long) {
+            handler.post {
+                videoFirstFrameRendered = true
+                handler.removeCallbacks(dvNoFrameWatchdog)
+                // A Dolby Vision file rendered by the device's REAL Dolby
+                // Vision decoder means the device can do Dolby Vision for this
+                // profile after all — forget any remembered base-layer fallback
+                // so the next open tries true Dolby Vision again.
+                val decoder = currentVideoDecoderName
+                if (dvInputFormat &&
+                    decoder != null &&
+                    decoder.contains("dv", ignoreCase = true)
+                ) {
+                    PlayerCodecs.setDvFallback(activity, player.videoFormat?.codecs, false)
+                }
+            }
+        }
+
+        override fun onVideoInputFormatChanged(
+            format: Format,
+            decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?,
+        ) {
+            handler.post {
+                rendererVideoFormat = format
+                dvInputFormat = format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+                if (dvInputFormat) armDvNoFrameWatchdog()
+            }
+        }
+    }
+
     private var player: ExoPlayer = createPlayer()
     private fun createPlayer(): ExoPlayer {
         lastDecoderMode = PlayerCodecs.decoderMode(activity)
         return ExoPlayer.Builder(activity)
             .setMediaSourceFactory(mediaSourceFactory)
             .setRenderersFactory(
-                DreamRenderersFactory(activity)
+                DreamRenderersFactory(activity, videoObserver)
                     .apply {
                         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
                         setEnableDecoderFallback(true)
@@ -547,7 +674,6 @@ class ExoPlayerView(
             }
     }
 
-    private val handler = Handler(Looper.getMainLooper())
     private var positionTicker: Runnable? = null
 
     /// True while MainActivity is in picture-in-picture mode (pushed via
@@ -1330,6 +1456,18 @@ class ExoPlayerView(
                     // A new media item: allow DV P5 rejection to fire again if
                     // this one is also Profile 5 on a DV-less device.
                     dvRejectionShown = false
+                    // New file: reset the Dolby Vision black-picture watchdog
+                    // and the device-wide base-layer switch (it belongs to the
+                    // PREVIOUS file). A profile that is known to be broken on
+                    // this device keeps its own remembered fallback, which the
+                    // codec selector reads on its own.
+                    dvInputFormat = false
+                    videoDecoderInitialized = false
+                    videoFirstFrameRendered = false
+                    dvHevcRetryDone = false
+                    rendererVideoFormat = null
+                    handler.removeCallbacks(dvNoFrameWatchdog)
+                    PlayerCodecs.forceHevcBaseLayer = false
                     hdr10PlusContent = false
                     hdr10Content = false
                     chapters = emptyList()
@@ -2166,6 +2304,15 @@ class ExoPlayerView(
         val colorTransfer = videoFormat?.colorInfo?.colorTransfer
         val codecs = videoFormat?.codecs
         val isDolbyVision = codecs?.let { Regex("dv(?:he|h1|av)\\.").containsMatchIn(it) } == true
+        // True when the track is Dolby Vision but the decoder that is actually
+        // running is NOT a Dolby Vision decoder: the HEVC base layer is
+        // playing (HDR10, no Dolby Vision metadata), so the UI must not claim
+        // Dolby Vision. The decoder component name is the only reliable
+        // signal — the track format stays `video/dolby-vision` either way.
+        val decoderName = currentVideoDecoderName
+        val dvBaseLayer = isDolbyVision &&
+            decoderName != null &&
+            !decoderName.contains("dv", ignoreCase = true)
         applyHdrHeadroom(
             when {
                 colorTransfer == C.COLOR_TRANSFER_ST2084 ||
@@ -2198,6 +2345,7 @@ class ExoPlayerView(
         map["videoWidth"] = videoSize.width
         map["videoHeight"] = videoSize.height
         map["colorTransfer"] = emittedColorTransfer
+        map["dvBaseLayer"] = dvBaseLayer
         map["isHdr10Plus"] = hdr10PlusContent
         map["isHdr10"] = hdr10Content
         map["audioCodecs"] = audioFormat?.codecs
@@ -2714,6 +2862,8 @@ class ExoPlayerView(
         if (activeView === this) activeView = null
         restoreRefreshRate()
         stopPositionTicker()
+        handler.removeCallbacks(dvNoFrameWatchdog)
+        PlayerCodecs.forceHevcBaseLayer = false
         unregisterSpatialListener()
         PlaybackManager.release(activity)
         DreamRenderersFactory.audioBoostProcessor.setBoostDb(0f)
@@ -2730,6 +2880,14 @@ class ExoPlayerView(
     companion object {
         private const val BUFFER_FOR_PLAYBACK_MS = 1_500
         private const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_000
+
+        /// How long a Dolby Vision track may stay black (decoder up, player
+        /// ready, still no frame rendered) before the playback is retried
+        /// through the HEVC base layer. The DV decoder normally renders its
+        /// first frame within a few hundred milliseconds of coming up, so this
+        /// is a generous margin that still catches the black-picture case
+        /// quickly enough to be useful.
+        private const val DV_NO_FRAME_TIMEOUT_MS = 12_000L
 
         /// The live platform view, if any — MainActivity forwards HOME /
         /// picture-in-picture mode changes to it (auto-pip + dismissal pause).

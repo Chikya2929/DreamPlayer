@@ -137,6 +137,25 @@ void main() {
         HdrFormat.sdr,
       );
     });
+
+    test('HEVC base layer of a Dolby Vision track is HDR10, not DV', () {
+      // The native side reports the base layer when the device's Dolby Vision
+      // decoder stays mute and the playback falls back to the HEVC base
+      // layer: the picture is HDR10 without any Dolby Vision metadata.
+      expect(
+        detectMedia3HdrFormat(
+          colorTransfer: 6,
+          videoCodecs: 'dvhe.08.06',
+          dvBaseLayer: true,
+        ),
+        HdrFormat.hdr10,
+      );
+      // Without the flag the same track is (still) Dolby Vision.
+      expect(
+        detectMedia3HdrFormat(colorTransfer: 6, videoCodecs: 'dvhe.08.06'),
+        HdrFormat.dolbyVision,
+      );
+    });
   });
 
   group('detectLiveHdrFormat', () {
