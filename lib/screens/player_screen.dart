@@ -7785,20 +7785,6 @@ if (mounted) setState(_applySwipeValue);
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // ±10 s buttons are TV-only (D-pad has no double-tap
-                      // gesture); phones use the double-tap-to-seek gesture.
-                      if (_isTv) ...[
-                        _TvControlButton(
-                          onPressed: !_backendReady
-                              ? null
-                              : () => _seekBy(const Duration(seconds: -10)),
-                          iconSize: 40,
-                          icon: const Icon(Icons.replay_10),
-                          color: Colors.white,
-                          onFocusChange: (_) => _showControls(),
-                        ),
-                        SizedBox(width: 8),
-                      ],
                       // Chapter jump, beside play/pause on every platform
                       // (issue #40). Only when the file actually has chapters,
                       // so nothing else changes. They sit INSIDE the pill
@@ -7810,6 +7796,20 @@ if (mounted) setState(_applySwipeValue);
                         _chapterButton(
                           icon: const Icon(Icons.skip_previous),
                           onPressed: _gotoPreviousChapter,
+                        ),
+                        SizedBox(width: 8),
+                      ],
+                      // ±10 s buttons are TV-only (D-pad has no double-tap
+                      // gesture); phones use the double-tap-to-seek gesture.
+                      if (_isTv) ...[
+                        _TvControlButton(
+                          onPressed: !_backendReady
+                              ? null
+                              : () => _seekBy(const Duration(seconds: -10)),
+                          iconSize: 40,
+                          icon: const Icon(Icons.replay_10),
+                          color: Colors.white,
+                          onFocusChange: (_) => _showControls(),
                         ),
                         SizedBox(width: 8),
                       ],
