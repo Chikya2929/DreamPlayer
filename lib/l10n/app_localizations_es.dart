@@ -1731,4 +1731,16 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get homeClearContinueWatchingContent =>
       'All continue watching entries will be removed.';
+
+  @override
+  String get browserViewMoreOptions => 'Más opciones';
+
+  @override
+  String get browserView => 'Vista';
+
+  @override
+  String get browserViewList => 'Lista';
+
+  @override
+  String get browserViewGrid => 'Cuadrícula';
 }

@@ -89,11 +89,19 @@ class TvFocusWrap extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
+    this.margin = const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
   });
 
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// Inset around the focused child.
+  ///
+  /// The default suits a [ListTile] row. A grid cell supplies its own spacing
+  /// through the grid delegate, so it passes [EdgeInsets.zero] instead of
+  /// being inset twice.
+  final EdgeInsets margin;
 
   @override
   State<TvFocusWrap> createState() => TvFocusWrapState();
@@ -170,8 +178,7 @@ class TvFocusWrapState extends State<TvFocusWrap> {
             duration: const Duration(milliseconds: 150),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              margin:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              margin: widget.margin,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
                 color: focused

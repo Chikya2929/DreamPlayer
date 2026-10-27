@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/video_item.dart';
+import '../services/browser_view_store.dart';
 import '../services/ftp_client.dart';
 import '../services/tmdb_client.dart';
 import '../services/tmdb_prefetch_queue.dart';
 import '../services/resume_progress_helper.dart';
 import '../services/watched_store.dart';
 import '../utils/file_info_extractor.dart';
+import '../widgets/browser_entry_card.dart';
+import '../widgets/browser_view_menu.dart';
 import '../widgets/server_form_kit.dart';
 import '../widgets/tv_overscan.dart';
 import '../widgets/tv_text_field.dart';
@@ -416,6 +419,8 @@ class _FtpScreenState extends State<FtpScreen> {
                 _loading = false;
               }),
             ),
+          if (browsing != null && !_atBrowseRoot)
+            const BrowserViewMenu(),
         ],
       ),
       floatingActionButton: browsing == null
@@ -501,34 +506,93 @@ class _FtpScreenState extends State<FtpScreen> {
     }
     return RefreshIndicator(
       onRefresh: _onRefresh,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _entries.length,
-        itemBuilder: (context, index) {
-          final entry = _entries[index];
-          final server = _browsing;
-          final meta = entry.isDirectory || server == null
-              ? null
-              : TmdService.instance.metaFor('ftp_${server.id}${entry.path}');
-          return _FtpTile(
-            entry: entry,
-            tmdbMeta: meta,
-            episode: _episodeFor(entry),
-            watched: !entry.isDirectory &&
-                _watchedKeys.contains(_watchedKeyFor(entry)),
-            onToggleWatched:
-                entry.isDirectory ? null : () => _toggleWatched(entry),
-            onTap: () => _openEntry(entry),
-            resumeProgress: entry.isDirectory
-                ? null
-                : ResumeProgressHelper.progressFor(
-                    _watchedKeyFor(entry),
-                    _resumePositionsMs,
-                    _durationsMs,
-                  ),
-          );
-        },
+      child: ListenableBuilder(
+        listenable: BrowserViewStore.instance,
+        builder: (context, _) => BrowserViewStore.instance.isGrid
+            ? _entryGrid(context)
+            : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemCount: _entries.length,
+                itemBuilder: (context, index) {
+                  final entry = _entries[index];
+                  final server = _browsing;
+                  final meta = entry.isDirectory || server == null
+                      ? null
+                      : TmdService.instance
+                          .metaFor('ftp_${server.id}${entry.path}');
+                  return _FtpTile(
+                    entry: entry,
+                    tmdbMeta: meta,
+                    episode: _episodeFor(entry),
+                    watched: !entry.isDirectory &&
+                        _watchedKeys.contains(_watchedKeyFor(entry)),
+                    onToggleWatched:
+                        entry.isDirectory ? null : () => _toggleWatched(entry),
+                    onTap: () => _openEntry(entry),
+                    resumeProgress: entry.isDirectory
+                        ? null
+                        : ResumeProgressHelper.progressFor(
+                            _watchedKeyFor(entry),
+                            _resumePositionsMs,
+                            _durationsMs,
+                          ),
+                  );
+                },
+              ),
       ),
+    );
+  }
+
+  /// The Grid view of the same folder: one tile per folder and per file.
+  Widget _entryGrid(BuildContext context) {
+    return BrowserEntryGrid(
+      itemCount: _entries.length,
+      itemBuilder: (context, index) {
+        final entry = _entries[index];
+        final server = _browsing;
+        final meta = entry.isDirectory || server == null
+            ? null
+            : TmdService.instance.metaFor('ftp_${server.id}${entry.path}');
+        final episode = _episodeFor(entry);
+        final parsed = ParsedFileName.parse(entry.name);
+        final code = parsed.isEpisode
+            ? 'S${parsed.season.toString().padLeft(2, '0')}'
+                'E${parsed.episode.toString().padLeft(2, '0')}'
+            : '';
+        final subtitle = [
+          code,
+          _FtpTile.sizeLabel(entry.size),
+        ].where((s) => s.isNotEmpty).join(' · ');
+        final title = entry.isDirectory
+            ? entry.name
+            : (episode?.nameLabel.isNotEmpty == true
+                ? episode!.nameLabel
+                : meta?.movie.title.isNotEmpty == true
+                    ? meta!.movie.title
+                    : entry.name);
+        return BrowserEntryCard(
+          title: title,
+          subtitle: subtitle,
+          artworkUrl: entry.isDirectory
+              ? null
+              : (episode?.stillUrl() ??
+                  meta?.movie.backdropUrl(width: 780) ??
+                  posterUrlOf(meta)),
+          fallbackIcon: entry.isDirectory
+              ? Icons.folder
+              : (parsed.isEpisode
+                  ? Icons.movie_outlined
+                  : Icons.play_circle_outline),
+          fallbackColor: entry.isDirectory
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondary,
+          watched: !entry.isDirectory &&
+              _watchedKeys.contains(_watchedKeyFor(entry)),
+          onToggleWatched:
+              entry.isDirectory ? null : () => _toggleWatched(entry),
+          onTap: () => _openEntry(entry),
+        );
+      },
     );
   }
 
@@ -627,7 +691,7 @@ class _FtpTile extends StatelessWidget {
   final VoidCallback? onToggleWatched;
   final double? resumeProgress;
 
-  static String _sizeLabel(int bytes) {
+  static String sizeLabel(int bytes) {
     if (bytes <= 0) return '';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     var value = bytes.toDouble();
@@ -726,11 +790,11 @@ class _FtpTile extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         filenameWidget,
-        if (_sizeLabel(entry.size).isNotEmpty)
+        if (sizeLabel(entry.size).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
-              _sizeLabel(entry.size),
+              sizeLabel(entry.size),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),

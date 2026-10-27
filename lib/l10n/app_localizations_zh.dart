@@ -1710,4 +1710,16 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get homeClearContinueWatchingContent =>
       'All continue watching entries will be removed.';
+
+  @override
+  String get browserViewMoreOptions => '更多选项';
+
+  @override
+  String get browserView => '视图';
+
+  @override
+  String get browserViewList => '列表';
+
+  @override
+  String get browserViewGrid => '网格';
 }

@@ -2263,5 +2263,21 @@
   "homeClearContinueWatchingContent": "All continue watching entries will be removed.",
   "@homeClearContinueWatchingContent": {
     "description": "Confirmation dialog body for clearing continue watching"
+  },
+  "browserViewMoreOptions": "More options",
+  "@browserViewMoreOptions": {
+    "description": "Tooltip for the three-dot overflow menu in the network browsers"
+  },
+  "browserView": "View",
+  "@browserView": {
+    "description": "Label for the view (List / Grid) option in the network browsers"
+  },
+  "browserViewList": "List",
+  "@browserViewList": {
+    "description": "Label for the list view option in the network browsers"
+  },
+  "browserViewGrid": "Grid",
+  "@browserViewGrid": {
+    "description": "Label for the grid view option in the network browsers"
   }
 }

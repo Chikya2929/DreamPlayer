@@ -1728,4 +1728,16 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get homeClearContinueWatchingContent =>
       'All continue watching entries will be removed.';
+
+  @override
+  String get browserViewMoreOptions => 'Дополнительные параметры';
+
+  @override
+  String get browserView => 'Вид';
+
+  @override
+  String get browserViewList => 'Список';
+
+  @override
+  String get browserViewGrid => 'Сетка';
 }

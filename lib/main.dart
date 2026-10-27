@@ -9,6 +9,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import 'services/app_debug_log.dart';
 import 'services/app_icon_service.dart';
+import 'services/browser_view_store.dart';
 import 'services/display_refresh_rate.dart';
 import 'services/download_manager.dart';
 import 'services/entitlements.dart';
@@ -29,6 +30,8 @@ Future<void> main() async {
   unawaited(AccentStore.load());
   unawaited(LayoutStore.load());
   unawaited(FontStore.load());
+  // List / Grid choice for the network browsers.
+  unawaited(BrowserViewStore.load());
   // Reconciles the launcher icon with the platform on every start and heals
   // the stored preference if a toggle was interrupted (issue #23).
   unawaited(AppIconService.instance.load());

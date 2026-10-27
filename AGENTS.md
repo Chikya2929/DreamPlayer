@@ -1653,6 +1653,53 @@ spatial icon for `AVPlayer` / `AVSampleBufferAudioRenderer` playback, and
 AirPods settings can read "Spatial Audio Not Playing" even while spatial
 audio is in fact active — do not treat either as a failure signal.
 
+### List / Grid view for the network browsers (2026-10-27) — read this before touching a browser row
+
+The network browsers (SMB, WebDAV, FTP, UPnP, Jellyfin) can show their entries
+as **rows** or as **tiles**. The switch is where Windows 11 puts it: the
+**three-dot ("View and more") at the top right → View → List / Grid**.
+
+**One preference for every browser.** `BrowserViewStore`
+(`lib/services/browser_view_store.dart`, prefs `dreamplayer.browserView`) is a
+`ChangeNotifier` singleton — switching to Grid in SMB switches WebDAV, FTP,
+UPnP and Jellyfin too. Five independent toggles would be five things to get
+wrong, and "the view is different in every browser" is never what a user wants
+from a view setting. The screens listen with a `ListenableBuilder`, so the
+choice applies **live** without re-entering the folder.
+
+**The grid shows folders AND files.** A folder is a folder glyph on a tinted
+tile; a file is artwork. The artwork is the episode **still** (16:9) when there
+is one, else the **backdrop**, else the **poster** — in that order, because the
+cell's box is 16:9 and a 2:3 poster cover-cropped into it loses half its
+height. `BrowserEntryCard` (`lib/widgets/browser_entry_card.dart`) is the one
+cell widget every browser uses.
+
+**Four traps, each of which produced a visibly broken grid:**
+
+1. **The cell height cannot come from a `childAspectRatio`.** The cell is a
+   16:9 artwork box PLUS a label block of a *fixed* height
+   (`kBrowserEntryLabelHeight`), so an aspect ratio leaves a gap under the
+   labels that grows with the cell width. `BrowserEntryGrid` therefore
+   `LayoutBuilder`s the available width, computes the column count and the
+   cell width, and passes an exact `mainAxisExtent` to the delegate.
+2. **`TvFocusWrap` now takes a `margin`.** Its default is the `ListTile` row
+   inset (12 px horizontal); a grid cell must pass `EdgeInsets.zero`, or every
+   tile is inset twice — once by the wrapper and once by the grid delegate —
+   and the artwork stops lining up with the cell edges.
+3. **`CachedImage` returns `SizedBox.shrink()` while loading.** The cell pins
+   its box with an `AspectRatio`, so a row of tiles does not collapse and jump
+   while the artwork streams in.
+4. **The grid applies to the FLAT list only.** The SMB *series* view (poster
+   header + season expansions, a `CustomScrollView` of slivers) keeps the row
+   layout — converting it to a sliver grid is a separate change. Everything
+   else (shares, movie folders, WebDAV/FTP/UPnP/Jellyfin folders) grids.
+
+**The three-dot was ADDED, not substituted.** The existing app-bar actions
+(bookmark to Home, SIMKL sync, server list) stay where they were — moving them
+into the overflow is a different decision and would hide the one-tap actions.
+The popup follows the repo's existing `PopupMenuItem(child: ListTile(...))`
+shape (see `file_browser_screen.dart`).
+
 ### Episode rows (issue #38, 0.5.1+25) — read this before touching a row
 
 Episode/video rows are **one widget**: `lib/widgets/episode_row.dart`

@@ -2188,5 +2188,21 @@
   "settingsDownloadFolder": "Carpeta de descargas",
   "@settingsDownloadFolder": {
     "description": "Translated key"
+  },
+  "browserViewMoreOptions": "Más opciones",
+  "@browserViewMoreOptions": {
+    "description": "Translated key"
+  },
+  "browserView": "Vista",
+  "@browserView": {
+    "description": "Translated key"
+  },
+  "browserViewList": "Lista",
+  "@browserViewList": {
+    "description": "Translated key"
+  },
+  "browserViewGrid": "Cuadrícula",
+  "@browserViewGrid": {
+    "description": "Translated key"
   }
 }

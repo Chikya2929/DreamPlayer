@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/video_item.dart';
+import '../services/browser_view_store.dart';
 import '../services/folder_scanner.dart';
 import '../services/library_folders.dart';
 import '../services/resume_progress_helper.dart';
@@ -14,6 +15,8 @@ import '../utils/episode_label.dart';
 import '../services/watched_store.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/season_group.dart' as sg;
+import '../widgets/browser_entry_card.dart';
+import '../widgets/browser_view_menu.dart';
 import '../widgets/season_progress_ring.dart';
 import '../widgets/server_form_kit.dart';
 import '../widgets/tv_overscan.dart';
@@ -937,6 +940,8 @@ class _SmbScreenState extends State<SmbScreen> {
                 _loading = false;
               }),
             ),
+          if (browsing != null && _share.isNotEmpty && !_loading)
+            const BrowserViewMenu(),
         ],
       ),
       floatingActionButton: browsing == null
@@ -1225,49 +1230,120 @@ class _SmbScreenState extends State<SmbScreen> {
   Widget _flatFileList(BuildContext context) {
     return RefreshIndicator(
       onRefresh: _onRefresh,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _entries.length,
-        itemBuilder: (context, index) {
-          final entry = _entries[index];
-          final key = _watchedKeyFor(entry);
-          // Read poster from TmdService directly (not the local _tmdbMeta map)
-          // so fix-match changes appear instantly on rebuild.
-          // Directories resolve as folders, files as individual titles, so a
-          // "Movies" folder shows its own poster/card rather than a bare row.
-          final serviceKey = entry.isDirectory
-              ? 'folder:smb:${_browsing!.id}/$_share/${entry.path}'
-              : 'smb:${_browsing!.id}/$_share/${entry.path}';
-          final meta = TmdService.instance.metaFor(serviceKey);
-          // Use TMDB episode runtime as fallback duration when ContinueWatchingStore
-          // has zero duration (happens when video.duration was zero at save time).
-          int? fallbackDurationMs;
-          if (meta != null && meta.movie.kind == TmdKind.tv) {
-            final parsed = ParsedFileName.parse(entry.name);
-            if (parsed.isEpisode) {
-              final season = meta.seasons[parsed.season];
-              final episode = season?.episode(parsed.episode);
-              if (episode?.runtimeMinutes != null) {
-                fallbackDurationMs = episode!.runtimeMinutes! * 60 * 1000;
-              }
-            }
-          }
-          return _SmbTile(
-            entry: entry,
-            onTap: () => _openEntry(entry),
-            tmdbMeta: meta,
-            watched: key.isNotEmpty && _watchedKeys.contains(key),
-            onToggleWatched: () => _toggleWatched(entry),
-            resumeProgress: key.isNotEmpty
-                ? ResumeProgressHelper.progressFor(
-                    key, _resumePositionsMs, _durationsMs,
-                    fallbackDurationMs: fallbackDurationMs)
-                : null,
-            effectiveSize: _fileSizes[entry.path],
-          );
-        },
+      child: ListenableBuilder(
+        listenable: BrowserViewStore.instance,
+        builder: (context, _) => BrowserViewStore.instance.isGrid
+            ? _flatFileGrid(context)
+            : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemCount: _entries.length,
+                itemBuilder: (context, index) {
+                  final entry = _entries[index];
+                  final key = _watchedKeyFor(entry);
+                  // Read poster from TmdService directly (not the local _tmdbMeta map)
+                  // so fix-match changes appear instantly on rebuild.
+                  // Directories resolve as folders, files as individual titles, so a
+                  // "Movies" folder shows its own poster/card rather than a bare row.
+                  final meta = _entryMeta(entry);
+                  // Use TMDB episode runtime as fallback duration when ContinueWatchingStore
+                  // has zero duration (happens when video.duration was zero at save time).
+                  int? fallbackDurationMs;
+                  if (meta != null && meta.movie.kind == TmdKind.tv) {
+                    final parsed = ParsedFileName.parse(entry.name);
+                    if (parsed.isEpisode) {
+                      final season = meta.seasons[parsed.season];
+                      final episode = season?.episode(parsed.episode);
+                      if (episode?.runtimeMinutes != null) {
+                        fallbackDurationMs = episode!.runtimeMinutes! * 60 * 1000;
+                      }
+                    }
+                  }
+                  return _SmbTile(
+                    entry: entry,
+                    onTap: () => _openEntry(entry),
+                    tmdbMeta: meta,
+                    watched: key.isNotEmpty && _watchedKeys.contains(key),
+                    onToggleWatched: () => _toggleWatched(entry),
+                    resumeProgress: key.isNotEmpty
+                        ? ResumeProgressHelper.progressFor(
+                            key, _resumePositionsMs, _durationsMs,
+                            fallbackDurationMs: fallbackDurationMs)
+                        : null,
+                    effectiveSize: _fileSizes[entry.path],
+                  );
+                },
+              ),
       ),
     );
+  }
+
+  /// TMDB metadata for one entry.
+  ///
+  /// Read from [TmdService] directly (not the local `_tmdbMeta` map) so a
+  /// fix-match shows up on the next rebuild.
+  TmdMeta? _entryMeta(SmbEntry entry) {
+    final server = _browsing;
+    if (server == null) return null;
+    final serviceKey = entry.isDirectory
+        ? 'folder:smb:${server.id}/$_share/${entry.path}'
+        : 'smb:${server.id}/$_share/${entry.path}';
+    return TmdService.instance.metaFor(serviceKey);
+  }
+
+  /// The Grid view of the same folder: one tile per folder and per file.
+  Widget _flatFileGrid(BuildContext context) {
+    return BrowserEntryGrid(
+      itemCount: _entries.length,
+      itemBuilder: (context, index) {
+        final entry = _entries[index];
+        final key = _watchedKeyFor(entry);
+        final meta = _entryMeta(entry);
+        final parsed = ParsedFileName.parse(entry.name);
+        final sizeLabel =
+            _SmbTile.sizeLabel(_fileSizes[entry.path] ?? entry.size);
+        final code = parsed.isEpisode
+            ? 'S${parsed.season.toString().padLeft(2, '0')}'
+                'E${parsed.episode.toString().padLeft(2, '0')}'
+            : '';
+        final subtitle = [code, sizeLabel]
+            .where((s) => s.isNotEmpty)
+            .join(' · ');
+        final title = entry.isDirectory
+            ? entry.name
+            : (meta?.movie.title.isNotEmpty == true
+                ? meta!.movie.title
+                : (parsed.isEpisode ? parsed.title : entry.name));
+        return BrowserEntryCard(
+          title: title,
+          subtitle: subtitle,
+          artworkUrl: entry.isDirectory ? null : _gridArtworkUrl(meta, parsed),
+          fallbackIcon: entry.isDirectory
+              ? Icons.folder
+              : (parsed.isEpisode
+                  ? Icons.movie_outlined
+                  : Icons.play_circle_outline),
+          fallbackColor: entry.isDirectory
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondary,
+          watched: key.isNotEmpty && _watchedKeys.contains(key),
+          onToggleWatched: entry.isDirectory ? null : () => _toggleWatched(entry),
+          onTap: () => _openEntry(entry),
+        );
+      },
+    );
+  }
+
+  /// Artwork for a grid tile: the episode still when there is one (16:9),
+  /// else the backdrop, else the poster.
+  String? _gridArtworkUrl(TmdMeta? meta, ParsedFileName parsed) {
+    if (meta != null && parsed.isEpisode) {
+      final episode = meta.seasons[parsed.season]?.episode(parsed.episode);
+      final still = episode?.stillUrl();
+      if (still != null) return still;
+    }
+    final backdrop = meta?.movie.backdropUrl(width: 780);
+    if (backdrop != null) return backdrop;
+    return posterUrlOf(meta);
   }
 
   /// Flat file list with a "Get Info" escape hatch for series folders
@@ -1520,7 +1596,7 @@ class _SmbTile extends StatelessWidget {
   /// when the native listing skipped per-file length() for performance.
   final int? effectiveSize;
 
-  static String _sizeLabel(int bytes) {
+  static String sizeLabel(int bytes) {
     if (bytes <= 0) return '';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     var value = bytes.toDouble();
@@ -1616,11 +1692,11 @@ class _SmbTile extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         filenameWidget,
-        if (_sizeLabel(effectiveSize ?? entry.size).isNotEmpty)
+        if (sizeLabel(effectiveSize ?? entry.size).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
-              _sizeLabel(effectiveSize ?? entry.size),
+              sizeLabel(effectiveSize ?? entry.size),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -2062,11 +2138,11 @@ class _SmbEpisodeTile extends StatelessWidget {
               ),
             ],
           ),
-          if (_SmbTile._sizeLabel(effectiveSize ?? entry.size).isNotEmpty)
+          if (_SmbTile.sizeLabel(effectiveSize ?? entry.size).isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                _SmbTile._sizeLabel(effectiveSize ?? entry.size),
+                _SmbTile.sizeLabel(effectiveSize ?? entry.size),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),

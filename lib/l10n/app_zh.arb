@@ -2188,5 +2188,21 @@
   "settingsDownloadFolder": "下载文件夹",
   "@settingsDownloadFolder": {
     "description": "Translated key"
+  },
+  "browserViewMoreOptions": "更多选项",
+  "@browserViewMoreOptions": {
+    "description": "Translated key"
+  },
+  "browserView": "视图",
+  "@browserView": {
+    "description": "Translated key"
+  },
+  "browserViewList": "列表",
+  "@browserViewList": {
+    "description": "Translated key"
+  },
+  "browserViewGrid": "网格",
+  "@browserViewGrid": {
+    "description": "Translated key"
   }
 }

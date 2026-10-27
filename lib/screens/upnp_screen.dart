@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/video_item.dart';
+import '../services/browser_view_store.dart';
 import '../services/jellyfin_client.dart';
 import '../services/tmdb_client.dart';
 import '../services/tmdb_prefetch_queue.dart';
@@ -10,6 +11,8 @@ import '../services/resume_progress_helper.dart';
 import '../services/watched_store.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
+import '../widgets/browser_entry_card.dart';
+import '../widgets/browser_view_menu.dart';
 import '../widgets/tv_overscan.dart';
 import '../widgets/episode_row.dart';
 import '../widgets/tv_tile.dart';
@@ -426,6 +429,8 @@ class _UpnpScreenState extends State<UpnpScreen> {
                 onPressed: _discovering ? null : _discover,
                 tooltip: AppLocalizations.of(context).upnpDiscover,
               ),
+            if (isBrowsingServer)
+              const BrowserViewMenu(),
           ],
         ),
         body: TvOverscan(
@@ -598,169 +603,226 @@ class _UpnpScreenState extends State<UpnpScreen> {
                         )
                       : RefreshIndicator(
                           onRefresh: _onRefresh,
-                          child: ListView.separated(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            itemCount: _entries.length,
-                            separatorBuilder: (context, _) => const Divider(height: 1),
-                            itemBuilder: (context, i) {
-                              final e = _entries[i];
-                              final isDir = e.isDirectory;
-                              final key = _identityKey(e);
-                              final tmdbMeta = isDir
-                                  ? null
-                                  : TmdService.instance.metaFor(key);
-                              final watched = !isDir &&
-                                  _watchedKeys.contains(key);
-                              final progress = isDir
-                                  ? null
-                                  : ResumeProgressHelper.progressFor(
-                                      key, _resumePositionsMs, _durationsMs);
+                          child: ListenableBuilder(
+                            listenable: BrowserViewStore.instance,
+                            builder: (context, _) => BrowserViewStore.instance.isGrid
+                                ? _entryGrid(context)
+                                : ListView.separated(
+                                    physics: const AlwaysScrollableScrollPhysics(),
+                                    itemCount: _entries.length,
+                                    separatorBuilder: (context, _) => const Divider(height: 1),
+                                    itemBuilder: (context, i) {
+                                      final e = _entries[i];
+                                      final isDir = e.isDirectory;
+                                      final key = _identityKey(e);
+                                      final tmdbMeta = isDir
+                                          ? null
+                                          : TmdService.instance.metaFor(key);
+                                      final watched = !isDir &&
+                                          _watchedKeys.contains(key);
+                                      final progress = isDir
+                                          ? null
+                                          : ResumeProgressHelper.progressFor(
+                                              key, _resumePositionsMs, _durationsMs);
 
-                              if (isDir) {
-                                return TvTile(
-                                  leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.primary),
-                                  title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  trailing: const Icon(Icons.chevron_right),
-                                  onTap: () => _onEntryTap(e),
-                                );
-                              }
+                                      if (isDir) {
+                                        return TvTile(
+                                          leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.primary),
+                                          title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                          trailing: const Icon(Icons.chevron_right),
+                                          onTap: () => _onEntryTap(e),
+                                        );
+                                      }
 
-                              final colorScheme = Theme.of(context).colorScheme;
-                              final parsed = ParsedFileName.parse(e.name);
-                              final effectiveLabel = parsed.isEpisode
-                                  ? 'S${parsed.season.toString().padLeft(2, '0')}E${parsed.episode.toString().padLeft(2, '0')}'
-                                  : '';
-                              final episode = _episodeFor(e);
-                              final stillUrl = episode?.stillUrl();
-                              final posterUrl = posterUrlOf(tmdbMeta);
+                                      final colorScheme = Theme.of(context).colorScheme;
+                                      final parsed = ParsedFileName.parse(e.name);
+                                      final effectiveLabel = parsed.isEpisode
+                                          ? 'S${parsed.season.toString().padLeft(2, '0')}E${parsed.episode.toString().padLeft(2, '0')}'
+                                          : '';
+                                      final episode = _episodeFor(e);
+                                      final stillUrl = episode?.stillUrl();
+                                      final posterUrl = posterUrlOf(tmdbMeta);
 
-                              final filenameWidget = Text(
-                                e.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                              );
-
-                              final titleWidget = Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  if (parsed.isEpisode) ...[
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: colorScheme.primaryContainer,
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                      child: Text(
-                                        effectiveLabel,
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                              color: colorScheme.onPrimaryContainer,
-                                            ),
-                                      ),
-                                    ),
-                                    SizedBox(width: 6),
-                                  ],
-                                  Expanded(
-                                    child: Text(
-parsed.isEpisode
-                                           ? (episode?.nameLabel.isNotEmpty == true
-                                               ? episode!.nameLabel
-                                               : tmdbMeta?.movie.title.isNotEmpty == true
-                                                   ? tmdbMeta!.movie.title
-                                                   : parsed.title)
-                                           : (tmdbMeta?.movie.title.isNotEmpty == true
-                                               ? tmdbMeta!.movie.title
-                                               : e.name),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                    ),
-                                  ),
-                                  if (tmdbMeta != null && tmdbMeta.movie.voteAverage > 0) ...[
-                                    SizedBox(width: 6),
-                                    const Icon(Icons.star, size: 13, color: Colors.amber),
-                                    SizedBox(width: 2),
-                                    Text(
-                                      tmdbMeta.movie.voteAverage.toStringAsFixed(1),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              );
-
-                              final subtitleWidget = Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  filenameWidget,
-                                  if (e.size > 0)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        _formatBytes(e.size),
+                                      final filenameWidget = Text(
+                                        e.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                               color: colorScheme.onSurfaceVariant,
                                             ),
-                                      ),
-                                    ),
-                                  if (progress != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(1),
-                                        child: LinearProgressIndicator(
-                                          value: progress,
-                                          minHeight: 2,
-                                          backgroundColor: colorScheme.surfaceContainerHighest,
-                                          valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              );
+                                      );
 
-                              return EpisodeRow(
-                                thumbBuilder: (size) => EpisodeStillThumb(
-                                stillUrl: stillUrl,
-                                posterUrl: posterUrl,
-                                size: size,
-                              ),
-                                title: titleWidget,
-                                subtitle: subtitleWidget,
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: watched
-                                          ? 'Mark as unwatched'
-                                          : 'Mark as watched',
-                                      icon: Icon(
-                                        watched
-                                            ? Icons.check_circle
-                                            : Icons.check_circle_outline,
-                                        color: watched
-                                            ? Colors.green.shade400
-                                            : colorScheme.onSurfaceVariant,
+                                      final titleWidget = Row(
+                                        crossAxisAlignment: CrossAxisAlignment.center,
+                                        children: [
+                                          if (parsed.isEpisode) ...[
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: colorScheme.primaryContainer,
+                                                borderRadius: BorderRadius.circular(3),
+                                              ),
+                                              child: Text(
+                                                effectiveLabel,
+                                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                      fontWeight: FontWeight.w700,
+                                                      color: colorScheme.onPrimaryContainer,
+                                                    ),
+                                              ),
+                                            ),
+                                            SizedBox(width: 6),
+                                          ],
+                                          Expanded(
+                                            child: Text(
+        parsed.isEpisode
+                                                   ? (episode?.nameLabel.isNotEmpty == true
+                                                       ? episode!.nameLabel
+                                                       : tmdbMeta?.movie.title.isNotEmpty == true
+                                                           ? tmdbMeta!.movie.title
+                                                           : parsed.title)
+                                                   : (tmdbMeta?.movie.title.isNotEmpty == true
+                                                       ? tmdbMeta!.movie.title
+                                                       : e.name),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                            ),
+                                          ),
+                                          if (tmdbMeta != null && tmdbMeta.movie.voteAverage > 0) ...[
+                                            SizedBox(width: 6),
+                                            const Icon(Icons.star, size: 13, color: Colors.amber),
+                                            SizedBox(width: 2),
+                                            Text(
+                                              tmdbMeta.movie.voteAverage.toStringAsFixed(1),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      );
+
+                                      final subtitleWidget = Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          filenameWidget,
+                                          if (e.size > 0)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 2),
+                                              child: Text(
+                                                _formatBytes(e.size),
+                                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                      color: colorScheme.onSurfaceVariant,
+                                                    ),
+                                              ),
+                                            ),
+                                          if (progress != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 4),
+                                              child: ClipRRect(
+                                                borderRadius: BorderRadius.circular(1),
+                                                child: LinearProgressIndicator(
+                                                  value: progress,
+                                                  minHeight: 2,
+                                                  backgroundColor: colorScheme.surfaceContainerHighest,
+                                                  valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      );
+
+                                      return EpisodeRow(
+                                        thumbBuilder: (size) => EpisodeStillThumb(
+                                        stillUrl: stillUrl,
+                                        posterUrl: posterUrl,
+                                        size: size,
                                       ),
-                                      onPressed: () => _toggleWatched(e),
-                                    ),
-                                  ],
-                                ),
-                                onTap: () => _onEntryTap(e),
-                              );
-                            },
+                                        title: titleWidget,
+                                        subtitle: subtitleWidget,
+                                        trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              tooltip: watched
+                                                  ? 'Mark as unwatched'
+                                                  : 'Mark as watched',
+                                              icon: Icon(
+                                                watched
+                                                    ? Icons.check_circle
+                                                    : Icons.check_circle_outline,
+                                                color: watched
+                                                    ? Colors.green.shade400
+                                                    : colorScheme.onSurfaceVariant,
+                                              ),
+                                              onPressed: () => _toggleWatched(e),
+                                            ),
+                                          ],
+                                        ),
+                                        onTap: () => _onEntryTap(e),
+                                      );
+                                    },
+                                  ),
                           ),
                         ),
         ),
       ],
+    );
+  }
+
+  /// The Grid view of the same folder: one tile per folder and per file.
+  Widget _entryGrid(BuildContext context) {
+    return BrowserEntryGrid(
+      itemCount: _entries.length,
+      itemBuilder: (context, i) {
+        final e = _entries[i];
+        final isDir = e.isDirectory;
+        final key = _identityKey(e);
+        final tmdbMeta =
+            isDir ? null : TmdService.instance.metaFor(key);
+        final watched = !isDir && _watchedKeys.contains(key);
+        final parsed = ParsedFileName.parse(e.name);
+        final episode = _episodeFor(e);
+        final code = parsed.isEpisode
+            ? 'S${parsed.season.toString().padLeft(2, '0')}'
+                'E${parsed.episode.toString().padLeft(2, '0')}'
+            : '';
+        final subtitle = [
+          code,
+          if (e.size > 0) _formatBytes(e.size),
+        ].where((s) => s.isNotEmpty).join(' · ');
+        final title = isDir
+            ? e.name
+            : (episode?.nameLabel.isNotEmpty == true
+                ? episode!.nameLabel
+                : tmdbMeta?.movie.title.isNotEmpty == true
+                    ? tmdbMeta!.movie.title
+                    : e.name);
+        return BrowserEntryCard(
+          title: title,
+          subtitle: subtitle,
+          artworkUrl: isDir
+              ? null
+              : (episode?.stillUrl() ??
+                  tmdbMeta?.movie.backdropUrl(width: 780) ??
+                  posterUrlOf(tmdbMeta)),
+          fallbackIcon: isDir
+              ? Icons.folder
+              : (parsed.isEpisode
+                  ? Icons.movie_outlined
+                  : Icons.play_circle_outline),
+          fallbackColor: isDir
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondary,
+          watched: watched,
+          onToggleWatched: isDir ? null : () => _toggleWatched(e),
+          onTap: () => _onEntryTap(e),
+        );
+      },
     );
   }
 

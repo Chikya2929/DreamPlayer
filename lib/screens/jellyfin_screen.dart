@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../models/video_item.dart';
+import '../services/browser_view_store.dart';
 import '../services/jellyfin_client.dart';
 import '../services/library_folders.dart';
 import '../services/series_grouping.dart';
 import '../services/tmdb_client.dart';
 import '../services/resume_progress_helper.dart';
 import '../services/watched_store.dart';
+import '../widgets/browser_entry_card.dart';
+import '../widgets/browser_view_menu.dart';
 import '../widgets/server_form_kit.dart';
 import '../widgets/tv_overscan.dart';
 import '../widgets/episode_row.dart';
@@ -495,6 +498,8 @@ class _JellyfinScreenState extends State<JellyfinScreen> {
                 _loading = false;
               }),
             ),
+          if (browsing != null && !_atBrowseRoot)
+            const BrowserViewMenu(),
         ],
       ),
       floatingActionButton: browsing == null
@@ -598,30 +603,88 @@ class _JellyfinScreenState extends State<JellyfinScreen> {
     }
     return RefreshIndicator(
       onRefresh: _onRefresh,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _items.length,
-        itemBuilder: (context, index) {
-          final item = _items[index];
-          return _JellyfinTile(
-            item: item,
-            tmdbMeta: _tmdbFor(item),
-            episode: _episodeForItem(item),
-            watched: !item.isFolder &&
-                _watchedKeys.contains(_watchedKeyFor(item)),
-            onToggleWatched:
-                item.isFolder ? null : () => _toggleWatched(item),
-            onTap: () => _openItem(item),
-            resumeProgress: item.isFolder
-                ? null
-                : ResumeProgressHelper.progressFor(
-                    _watchedKeyFor(item),
-                    _resumePositionsMs,
-                    _durationsMs,
-                  ),
-          );
-        },
+      child: ListenableBuilder(
+        listenable: BrowserViewStore.instance,
+        builder: (context, _) => BrowserViewStore.instance.isGrid
+            ? _itemGrid(context)
+            : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemCount: _items.length,
+                itemBuilder: (context, index) {
+                  final item = _items[index];
+                  return _JellyfinTile(
+                    item: item,
+                    tmdbMeta: _tmdbFor(item),
+                    episode: _episodeForItem(item),
+                    watched: !item.isFolder &&
+                        _watchedKeys.contains(_watchedKeyFor(item)),
+                    onToggleWatched:
+                        item.isFolder ? null : () => _toggleWatched(item),
+                    onTap: () => _openItem(item),
+                    resumeProgress: item.isFolder
+                        ? null
+                        : ResumeProgressHelper.progressFor(
+                            _watchedKeyFor(item),
+                            _resumePositionsMs,
+                            _durationsMs,
+                          ),
+                  );
+                },
+              ),
       ),
+    );
+  }
+
+  /// The Grid view of the same folder: one tile per folder and per file.
+  Widget _itemGrid(BuildContext context) {
+    return BrowserEntryGrid(
+      itemCount: _items.length,
+      itemBuilder: (context, index) {
+        final item = _items[index];
+        final episode = _episodeForItem(item);
+        final meta = _tmdbFor(item);
+        final parsed = ParsedFileName.parse(item.name);
+        final isEpisode = parsed.isEpisode || episode != null;
+        final code = isEpisode
+            ? (parsed.isEpisode
+                ? 'S${parsed.season.toString().padLeft(2, '0')}'
+                    'E${parsed.episode.toString().padLeft(2, '0')}'
+                : item.seasonLabel)
+            : '';
+        final subtitle = [
+          code,
+          item.sizeLabel,
+        ].where((s) => s.isNotEmpty).join(' · ');
+        final title = item.isFolder
+            ? item.name
+            : (episode?.nameLabel.isNotEmpty == true
+                ? episode!.nameLabel
+                : meta?.movie.title.isNotEmpty == true
+                    ? meta!.movie.title
+                    : item.name);
+        return BrowserEntryCard(
+          title: title,
+          subtitle: subtitle,
+          artworkUrl: item.isFolder
+              ? null
+              : (episode?.stillUrl() ??
+                  meta?.movie.backdropUrl(width: 780) ??
+                  posterUrlOf(meta)),
+          fallbackIcon: item.isFolder
+              ? Icons.folder
+              : (isEpisode
+                  ? Icons.movie_outlined
+                  : Icons.play_circle_outline),
+          fallbackColor: item.isFolder
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondary,
+          watched: !item.isFolder &&
+              _watchedKeys.contains(_watchedKeyFor(item)),
+          onToggleWatched:
+              item.isFolder ? null : () => _toggleWatched(item),
+          onTap: () => _openItem(item),
+        );
+      },
     );
   }
 

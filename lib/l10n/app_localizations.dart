@@ -3335,6 +3335,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'All continue watching entries will be removed.'**
   String get homeClearContinueWatchingContent;
+
+  /// Tooltip for the three-dot overflow menu in the network browsers
+  ///
+  /// In en, this message translates to:
+  /// **'More options'**
+  String get browserViewMoreOptions;
+
+  /// Label for the view (List / Grid) option in the network browsers
+  ///
+  /// In en, this message translates to:
+  /// **'View'**
+  String get browserView;
+
+  /// Label for the list view option in the network browsers
+  ///
+  /// In en, this message translates to:
+  /// **'List'**
+  String get browserViewList;
+
+  /// Label for the grid view option in the network browsers
+  ///
+  /// In en, this message translates to:
+  /// **'Grid'**
+  String get browserViewGrid;
 }
 
 class _AppLocalizationsDelegate

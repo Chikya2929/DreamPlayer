@@ -2188,5 +2188,21 @@
   "settingsDownloadFolder": "Папка загрузок",
   "@settingsDownloadFolder": {
     "description": "Translated key"
+  },
+  "browserViewMoreOptions": "Дополнительные параметры",
+  "@browserViewMoreOptions": {
+    "description": "Translated key"
+  },
+  "browserView": "Вид",
+  "@browserView": {
+    "description": "Translated key"
+  },
+  "browserViewList": "Список",
+  "@browserViewList": {
+    "description": "Translated key"
+  },
+  "browserViewGrid": "Сетка",
+  "@browserViewGrid": {
+    "description": "Translated key"
   }
 }

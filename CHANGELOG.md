@@ -7,6 +7,11 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **List or Grid view in the network browsers.** The three-dot menu at the top
+  right of the SMB, WebDAV, FTP, DLNA and Jellyfin browsers now has a **View**
+  entry: **List** for the familiar rows, **Grid** for tiles with artwork —
+  folders, movies and episode stills. The choice applies to every network
+  browser at once and is remembered.
 - **Frame interpolation for the MPV engine (issue #53).** Settings → Player →
   "Frame interpolation (MPV)" and the same section in the player's ⋮ sheet let
   you pick a target frame rate (30 / 48 / 60 / 120) and a quality. A 24 fps
