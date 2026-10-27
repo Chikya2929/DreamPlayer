@@ -6,7 +6,12 @@ import 'cached_image.dart';
 import 'tv_tile.dart';
 
 /// Height reserved for the label block under a grid cell's artwork.
-const double kBrowserEntryLabelHeight = 62;
+///
+/// One line for the name and one for the secondary line — the name is
+/// deliberately NOT wrapped onto a second line: a two-line name made the
+/// tile look broken (the label block grew past the artwork) and the first
+/// line is the one that identifies the file anyway.
+const double kBrowserEntryLabelHeight = 44;
 
 /// A grid cell for one file or folder in the network browsers' Grid view.
 ///
@@ -79,7 +84,7 @@ class BrowserEntryCard extends StatelessWidget {
                       Flexible(
                         child: Text(
                           title,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w500,
@@ -200,8 +205,9 @@ class BrowserEntryGrid extends StatelessWidget {
   final EdgeInsets padding;
 
   /// Target width of one cell. Wider screens get more columns rather than
-  /// bigger cells.
-  static const double targetCellWidth = 170;
+  /// bigger cells — a cell that grows with the screen stops reading as a
+  /// grid and starts reading as a poster card.
+  static const double targetCellWidth = 150;
 
   @override
   Widget build(BuildContext context) {

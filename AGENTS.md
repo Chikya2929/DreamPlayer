@@ -1689,7 +1689,13 @@ cell widget every browser uses.
 3. **`CachedImage` returns `SizedBox.shrink()` while loading.** The cell pins
    its box with an `AspectRatio`, so a row of tiles does not collapse and jump
    while the artwork streams in.
-4. **The grid applies to the FLAT list only.** The SMB *series* view (poster
+4. **The cell's NAME is ONE line.** A two-line name grew the label block past
+   the artwork and the tile read as broken; the first line is the one that
+   identifies the file anyway, so the title is `maxLines: 1` + ellipsis and
+   the label block is a fixed 44 px. The tile also stops growing with the
+   screen: the column count follows a 150 dp target, so a tablet gets more
+   columns instead of bigger cards.
+5. **The grid applies to the FLAT list only.** The SMB *series* view (poster
    header + season expansions, a `CustomScrollView` of slivers) keeps the row
    layout — converting it to a sliver grid is a separate change. Everything
    else (shares, movie folders, WebDAV/FTP/UPnP/Jellyfin folders) grids.
@@ -1699,6 +1705,13 @@ cell widget every browser uses.
 into the overflow is a different decision and would hide the one-tap actions.
 The popup follows the repo's existing `PopupMenuItem(child: ListTile(...))`
 shape (see `file_browser_screen.dart`).
+
+**The three-dot appears as soon as a SERVER is picked — not when a share is
+opened.** The shares list is an entry list too (the shares are rendered by the
+same flat list), so gating the menu on "a share is open" hid the switch on the
+page the user lands on first. It is still not offered on the *server* list,
+where there is nothing to grid: offering a choice that resolves nothing is
+worse than not offering it.
 
 ### Episode rows (issue #38, 0.5.1+25) — read this before touching a row
 

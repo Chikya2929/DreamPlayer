@@ -141,13 +141,44 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('the three-dot appears once a folder is open',
+    testWidgets('the three-dot appears as soon as a server is picked',
         (tester) async {
       await pumpFolder(tester);
 
       expect(find.byType(BrowserViewMenu), findsOneWidget);
       expect(find.text('Movies'), findsOneWidget);
       expect(find.textContaining('Big Buck Bunny'), findsWidgets);
+    });
+
+    testWidgets('the three-dot is already on the shares list', (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        switch (call.method) {
+          case 'listServers':
+            return [server()];
+          case 'checkServer':
+            return true;
+          case 'listShares':
+            return [shareEntry()];
+          case 'listDirectory':
+            return [folderEntry(), fileEntry()];
+        }
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+      await BrowserViewStore.load();
+      await tester.pumpWidget(localizedApp(const SmbScreen()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('NAS'));
+      await tester.pumpAndSettle();
+
+      // The shares list is an entry list, so the view switch belongs here —
+      // not only after a share has been opened.
+      expect(find.byType(BrowserViewMenu), findsOneWidget);
+      expect(find.text('downloads'), findsOneWidget);
     });
 
     testWidgets('Grid shows folders AND files as tiles', (tester) async {

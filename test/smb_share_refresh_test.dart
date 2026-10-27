@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:dream_player/screens/smb_screen.dart';
+
+import 'test_helper.dart';
 
 /// Regression for the iOS report: logging in showed the share list, but
 /// pull-to-refresh on that list errored with "Could not read that folder".
@@ -67,7 +68,7 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const MaterialApp(home: SmbScreen()));
+    await tester.pumpWidget(localizedApp(const SmbScreen()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('NAS'));
@@ -128,7 +129,7 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const MaterialApp(home: SmbScreen()));
+    await tester.pumpWidget(localizedApp(const SmbScreen()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('NAS'));

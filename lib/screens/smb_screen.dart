@@ -940,7 +940,10 @@ class _SmbScreenState extends State<SmbScreen> {
                 _loading = false;
               }),
             ),
-          if (browsing != null && _share.isNotEmpty && !_loading)
+          // The three-dot appears as soon as a server is picked: the shares
+          // list is an entry list too, so the view switch applies there (and
+          // not only once a share is opened).
+          if (browsing != null)
             const BrowserViewMenu(),
         ],
       ),

@@ -523,7 +523,7 @@ class _WebDavScreenState extends State<WebDavScreen> {
                 _loading = false;
               }),
             ),
-          if (browsing != null && !_atBrowseRoot)
+          if (browsing != null)
             const BrowserViewMenu(),
         ],
       ),

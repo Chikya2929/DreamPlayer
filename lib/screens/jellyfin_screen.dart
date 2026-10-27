@@ -498,7 +498,7 @@ class _JellyfinScreenState extends State<JellyfinScreen> {
                 _loading = false;
               }),
             ),
-          if (browsing != null && !_atBrowseRoot)
+          if (browsing != null)
             const BrowserViewMenu(),
         ],
       ),

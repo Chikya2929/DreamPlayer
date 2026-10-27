@@ -4,6 +4,15 @@ import '../l10n/app_localizations.dart';
 import '../services/browser_view_store.dart';
 import 'tv_tile.dart';
 
+/// The localized strings, or English when the delegates are not installed.
+///
+/// The menu is mounted by five browser screens, and a browser must never
+/// crash because a widget test (or an embedder) left the localization
+/// delegates out — `AppLocalizations.of` force-unwraps, so the lookup is done
+/// through [Localizations.of] instead.
+AppLocalizations? _l10n(BuildContext context) =>
+    Localizations.of<AppLocalizations>(context, AppLocalizations);
+
 /// The three-dot overflow in the network browsers' app bars.
 ///
 /// Windows 11 hides the view switch behind "View and more" (the ⋮ at the top
@@ -14,11 +23,11 @@ class BrowserViewMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
+    final l10n = _l10n(context);
     return PopupMenuButton<String>(
       key: const ValueKey('browserViewMenu'),
       icon: const Icon(Icons.more_vert),
-      tooltip: l10n.browserViewMoreOptions,
+      tooltip: l10n?.browserViewMoreOptions ?? 'More options',
       onSelected: (value) {
         if (value == _kView) showBrowserViewPicker(context);
       },
@@ -28,7 +37,7 @@ class BrowserViewMenu extends StatelessWidget {
           child: ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.view_agenda_outlined),
-            title: Text(l10n.browserView),
+            title: Text(l10n?.browserView ?? 'View'),
           ),
         ),
       ],
@@ -47,7 +56,7 @@ Future<void> showBrowserViewPicker(BuildContext context) async {
   await showModalBottomSheet<void>(
     context: context,
     builder: (sheetContext) {
-      final l10n = AppLocalizations.of(sheetContext);
+      final l10n = _l10n(sheetContext);
       return SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -56,7 +65,7 @@ Future<void> showBrowserViewPicker(BuildContext context) async {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
               child: Text(
-                l10n.browserView,
+                l10n?.browserView ?? 'View',
                 style: Theme.of(sheetContext).textTheme.titleMedium,
               ),
             ),
@@ -69,7 +78,7 @@ Future<void> showBrowserViewPicker(BuildContext context) async {
                   children: [
                     TvTile(
                       leading: const Icon(Icons.view_list),
-                      title: Text(l10n.browserViewList),
+                      title: Text(l10n?.browserViewList ?? 'List'),
                       trailing: mode == BrowserViewMode.list
                           ? const Icon(Icons.check)
                           : null,
@@ -80,7 +89,7 @@ Future<void> showBrowserViewPicker(BuildContext context) async {
                     ),
                     TvTile(
                       leading: const Icon(Icons.grid_view),
-                      title: Text(l10n.browserViewGrid),
+                      title: Text(l10n?.browserViewGrid ?? 'Grid'),
                       trailing: mode == BrowserViewMode.grid
                           ? const Icon(Icons.check)
                           : null,

@@ -419,7 +419,7 @@ class _FtpScreenState extends State<FtpScreen> {
                 _loading = false;
               }),
             ),
-          if (browsing != null && !_atBrowseRoot)
+          if (browsing != null)
             const BrowserViewMenu(),
         ],
       ),
