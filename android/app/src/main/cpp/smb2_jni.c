@@ -11,7 +11,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/prctl.h>
 #include <smb2/smb2.h>
+
+/* Disable Android tagged pointers (MTE) for this library — libsmb2 stores
+ * pointers in fields that may be 32-bit, and tagged pointers truncate them. */
+__attribute__((constructor))
+static void disable_tagged_pointers(void) {
+    prctl(0x53564d41 /* PR_SET_TAGGED_ADDR_CTRL */, 0, 0, 0, 0);
+}
 #include <smb2/libsmb2.h>
 #include <smb2/libsmb2-raw.h>
 
@@ -81,7 +89,10 @@ Java_com_dreamplayer_app_Smb2Native_openSession(JNIEnv *env, jclass cls,
     if (rc < 0) {
         const char *err = smb2_get_error(s->ctx);
         (void)err;
-        smb2_destroy_context(s->ctx);
+        /* Do NOT call smb2_disconnect_share / smb2_destroy_context here:
+         * on a failed connect the context's fd state is partial and
+         * destroying it crashes (smb2_close_connecting_fds SIGSEGV).
+         * Leak the context on the error path — acceptable for a video player. */
         (*env)->ReleaseStringUTFChars(env, jhost, host);
         (*env)->ReleaseStringUTFChars(env, juser, user);
         (*env)->ReleaseStringUTFChars(env, jpass, pass);
@@ -104,10 +115,13 @@ JNIEXPORT void JNICALL
 Java_com_dreamplayer_app_Smb2Native_closeSession(JNIEnv *env, jclass cls, jlong session) {
     Smb2Session *s = to_session(session);
     if (!s) return;
-    if (s->connected && s->ctx) {
-        smb2_disconnect_share(s->ctx);
+    if (s->ctx) {
+        if (s->connected) smb2_disconnect_share(s->ctx);
+        /* smb2_destroy_context crashes in smb2_free_pdu on some contexts
+         * (heap corruption from pending PDUs). Leak the context instead —
+         * the OS reclaims it when the app exits. */
+        s->ctx = NULL;
     }
-    if (s->ctx) smb2_destroy_context(s->ctx);
     free(s->host); free(s->share); free(s->user); free(s->pass); free(s);
 }
 
@@ -128,11 +142,16 @@ Java_com_dreamplayer_app_Smb2Native_openFile(JNIEnv *env, jclass cls,
     if (!s || !s->ctx) return 0;
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     /* share-relative, backslashes, no leading separator */
+    if (!path || !path[0]) {
+        (*env)->ReleaseStringUTFChars(env, jpath, path);
+        return 0;
+    }
     char *native = dupstr(path);
     (*env)->ReleaseStringUTFChars(env, jpath, path);
     /* normalise */
     char *p = native;
     while (*p == '/') p++;
+    if (!p[0]) { free(native); return 0; }
     /* convert remaining slashes */
     char *q = p;
     /* work on a copy */
@@ -178,7 +197,7 @@ JNIEXPORT jint JNICALL
 Java_com_dreamplayer_app_Smb2Native_readAt(JNIEnv *env, jclass cls,
     jlong file, jlong offset, jbyteArray jbuf, jint len) {
     Smb2File *sf = to_file(file);
-    if (!sf || !sf->fh || len <= 0) return -1;
+    if (!sf || !sf->fh || !sf->ctx || len <= 0) return -1;
     jbyte *buf = (*env)->GetByteArrayElements(env, jbuf, NULL);
     ssize_t n = smb2_pread(sf->ctx, sf->fh, (uint8_t *)buf, (uint32_t)len, (uint64_t)offset);
     (*env)->ReleaseByteArrayElements(env, jbuf, buf, 0);

@@ -19,7 +19,8 @@ class LibSmb2Session private constructor(
     val share: String,
     private val handle: Long,
 ) {
-    val isOpen: Boolean get() = handle != 0L
+    @Volatile private var closed = false
+    val isOpen: Boolean get() = handle != 0L && !closed
 
     fun error(): String = if (handle != 0L) Smb2Native.getError(handle) else "no session"
 
@@ -38,6 +39,8 @@ class LibSmb2Session private constructor(
     }
 
     fun close() {
+        if (closed) return
+        closed = true
         if (handle != 0L) Smb2Native.closeSession(handle)
     }
 

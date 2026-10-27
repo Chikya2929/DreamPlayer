@@ -215,7 +215,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
             val secondaries = ArrayList<LibSmb2RandomAccessFile?>(BufferTuning.prefetchThreads)
             if (needPrefetch) {
                 try {
-                    for (i in 1 until BufferTuning.prefetchThreads) {
+                    for (i in 0 until 1) {
                         secondaries.add(openSecondaryHandle())
                     }
                 } catch (e: Exception) {
@@ -466,8 +466,10 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         path: String,
     ): Long {
         closeHandles()
+        val user = if (creds.anonymous) "guest" else creds.username
+        val pass = if (creds.anonymous) "" else creds.password
         val s = LibSmb2Session.open(
-            creds.host, creds.port, creds.username, creds.password,
+            creds.host, creds.port, user, pass,
             creds.domain, share,
         ) ?: throw IOException("libsmb2: could not connect to $share on ${creds.host}")
         val f = s.openFile(path) ?: run { s.close(); throw IOException("libsmb2: could not open $path (${s.error()})") }
@@ -485,8 +487,10 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         val share = savedShare ?: return null
         val path = savedPath ?: return null
         return try {
+            val user = if (creds.anonymous) "guest" else creds.username
+            val pass = if (creds.anonymous) "" else creds.password
             val s = LibSmb2Session.open(
-                creds.host, creds.port, creds.username, creds.password,
+                creds.host, creds.port, user, pass,
                 creds.domain, share,
             ) ?: return null
             s.openFile(path) ?: run { s.close(); return null }
@@ -531,15 +535,26 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
     /// Starts prefetch threads with secondary handles that were already opened
     /// OUTSIDE ringLock (see [open]). Caller holds ringLock.
     private fun startPrefetchers(secondaries: List<LibSmb2RandomAccessFile?>) {
-        for (i in 0 until BufferTuning.prefetchThreads) {
-            val handle = if (i == 0) null else secondaries.getOrNull(i - 1)
+        // Every prefetch thread (including t0) gets its OWN handle now. libsmb2
+        // contexts are not thread-safe, so sharing the primary raf with a
+        // prefetch thread and then freeing it on close() is a use-after-free
+        // that corrupts the heap and crashes the next smb2_open.
+        val handles = mutableListOf<LibSmb2RandomAccessFile?>()
+        // t0 reuses the first secondary; if none, open one.
+        val first = secondaries.getOrNull(0) ?: openSecondaryHandle()
+        handles.add(first)
+        for (i in 1 until BufferTuning.prefetchThreads) {
+            handles.add(secondaries.getOrNull(i - 1) ?: openSecondaryHandle())
+        }
+        for (i in 0 until 2) {
+            val handle = handles.getOrNull(i)
             val t = Thread { prefetchLoop(prefetchGen, i, handle) }
             t.isDaemon = true
             t.name = "smb-prefetch-$i"
             t.start()
             prefetchers.add(t)
         }
-        Log.i(TAG, "started ${BufferTuning.prefetchThreads} prefetch threads")
+        Log.i(TAG, "started 2 prefetch threads")
     }
 
     private fun prefetchLoop(gen: Long, threadIdx: Int, secondaryHandle: LibSmb2RandomAccessFile?) {
@@ -591,31 +606,15 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
             var got = -2
             var attempted = false
             val readStart = System.nanoTime()
-            if (threadIdx == 0) {
-                synchronized(smbLock) {
-                    val r = raf
-                    if (r != null) {
-                        attempted = true
-                        try {
-                            r.seek(readAt)
-                            got = r.read(tmpBuf, 0, readLen)
-                        } catch (e: Exception) {
-                            if (!prefetchKilled) Log.w(TAG, "t0 error at $readAt: ${e.message}")
-                            got = -2
-                        }
-                    }
-                }
-            } else {
-                val r = handle
-                if (r != null) {
-                    attempted = true
-                    try {
-                        r.seek(readAt)
-                        got = r.read(tmpBuf, 0, readLen)
-                    } catch (e: Exception) {
-                        if (!prefetchKilled) Log.w(TAG, "t$threadIdx error at $readAt: ${e.message}")
-                        got = -2
-                    }
+            val r = handle
+            if (r != null) {
+                attempted = true
+                try {
+                    r.seek(readAt)
+                    got = r.read(tmpBuf, 0, readLen)
+                } catch (e: Exception) {
+                    if (!prefetchKilled) Log.w(TAG, "t$threadIdx error at $readAt: ${e.message}")
+                    got = -2
                 }
             }
 
@@ -687,49 +686,24 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                 // NEVER filled — the consumer blocks at the hole forever and
                 // Media3 surfaces an "io unspecified" error. Reconnect the handle
                 // and rewind `nextWritePos` to the region start so it gets retried.
-                if (threadIdx == 0) {
-                    synchronized(smbLock) {
-                        try { raf?.close() } catch (_: Exception) {}
-                        raf = null
-                        try { session?.close() } catch (_: Exception) {}
-                        session = null
-                        val c = savedCreds
-                        val sh = savedShare
-                        val p = savedPath
-                        if (c != null && sh != null && p != null) {
-                            try {
-                                val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
-                                if (ns != null) {
-                                    ns.openFile(p)
-                                    session = ns
-                                    raf = LibSmb2RandomAccessFile(ns, p)
-                                    Log.i(TAG, "t0 reconnected after read error")
-                                }
-                            } catch (ex: Exception) {
-                                Log.w(TAG, "t0 reconnect failed: ${ex.message}")
+                try { (handle as? LibSmb2RandomAccessFile)?.close() } catch (_: Exception) {}
+                val c = savedCreds
+                val sh = savedShare
+                val p = savedPath
+                handle = if (c != null && sh != null && p != null) {
+                    try {
+                        val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
+                        if (ns != null) {
+                            ns.openFile(p)
+                            LibSmb2RandomAccessFile(ns, p).also {
+                                Log.i(TAG, "t$threadIdx reconnected after read error")
                             }
-                        }
+                        } else null
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "t$threadIdx reconnect failed: ${ex.message}")
+                        null
                     }
-                } else {
-                    try { (handle as? LibSmb2RandomAccessFile)?.close() } catch (_: Exception) {}
-                    val c = savedCreds
-                    val sh = savedShare
-                    val p = savedPath
-                    handle = if (c != null && sh != null && p != null) {
-                        try {
-                            val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
-                            if (ns != null) {
-                                ns.openFile(p)
-                                LibSmb2RandomAccessFile(ns, p).also {
-                                    Log.i(TAG, "t$threadIdx reconnected after read error")
-                                }
-                            } else null
-                        } catch (ex: Exception) {
-                            Log.w(TAG, "t$threadIdx reconnect failed: ${ex.message}")
-                            null
-                        }
-                    } else null
-                }
+                } else null
                 synchronized(ringLock) {
                     // Re-expose the failed region: never move the write head
                     // forward past it, only back to its start.
@@ -761,7 +735,9 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                     val p = savedPath
                     if (c != null && sh != null && p != null) {
                         try {
-                            val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
+                            val user = if (c.anonymous) "guest" else c.username
+                            val pass = if (c.anonymous) "" else c.password
+                            val ns = LibSmb2Session.open(c.host, c.port, user, pass, c.domain, sh)
                             handle = if (ns != null) { ns.openFile(p); LibSmb2RandomAccessFile(ns, p) } else null
                             Log.i(TAG, "t$threadIdx recovered handle after ${handleAttempts}s")
                             break // got a handle, rejoin the read loop
@@ -777,11 +753,12 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
     }
 
     private fun closeHandles() {
+        // raf.close() already closes the file handle AND the session.
+        // Do NOT close libFile or session again — double-close on libsmb2
+        // contexts corrupts the heap and crashes the next smb2_open.
         try { raf?.close() } catch (_: Exception) {}
         raf = null
-        try { libFile?.close() } catch (_: Exception) {}
         libFile = null
-        try { session?.close() } catch (_: Exception) {}
         session = null
     }
 
