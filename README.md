@@ -109,7 +109,7 @@ Each thumbnail is linked — click any image to open it full size.
 - Optional **Media3 audio passthrough** over HDMI for Dolby Atmos / DTS:X on compatible soundbars
 - **Spatial audio** (Android 13+) — the same phone Spatial-audio setting drives both Media3 and MPV; the teal chip shows when the system Spatializer can virtualize the current multichannel PCM output on wired, USB, and Bluetooth routes
 - **Bass Boost** — Off/Low/Medium/High session-level DSP that restores the low-end HRTF virtualization thins out (appears while Spatial audio is engaged)
-- **Volume Boost + Night Mode** — up to 3× loudness lift and dynamic-range compression (Android)
+- **Volume Boost + Night Mode** — swipe the volume past 100% for up to 2× (200%) of make-up gain, applied to the decoded audio itself with a peak limiter, so it lifts the whole mix instead of crushing the centre channel (Android). Night Mode adds a further +4 dB. A warning appears the moment you cross 100%
 
 ### Subtitles
 - **Embedded + sideloaded** — every subtitle file next to the video auto-attaches
@@ -142,7 +142,7 @@ Each thumbnail is linked — click any image to open it full size.
 - **OpenSubtitles** — search/download from CC (5/day anon, 20/day free login); Nova-based language catalog (full names, 3-letter `eng/fre/pob/zho`, `zh-CN/zh-TW`) for reading + download prefs + text encoding (CP1250…CP949)
 
 ### Network Playback
-- **SMB / NAS** — in-app SMB browser on **both** iOS and Android: add a server, browse its shares, pin a folder to Home, and play. A subnet sweep finds servers on the LAN and reports each one's SMB version; saved servers show a green/red reachability dot. Playback reads go straight to the share, and resume plus the saved audio track both survive reopening. CX Explorer "Open with" handoff also works
+- **SMB / NAS** — in-app SMB browser on **both** iOS and Android: add a server, browse its shares, pin a folder to Home, and play. A subnet sweep finds servers on the LAN and reports each one's SMB version; saved servers show a green/red reachability dot. Playback reads go straight to the share over **libsmb2**, with parallel read-ahead, on both engines — resume plus the saved audio track both survive reopening. CX Explorer "Open with" handoff also works
 - **WebDAV** — browse and stream from WebDAV servers on both platforms
 - **Jellyfin / Emby** — browse libraries, direct-play with auto-discovery
 - **FTP / SFTP** — browse and stream from FTP servers and SSH/SFTP file hosts
@@ -152,6 +152,7 @@ Each thumbnail is linked — click any image to open it full size.
 
 ### Smart Library
 - **Continue watching** — resume any partially-watched video with progress bars
+- **Library search** — the Home app bar has a search button for everything already in the library: shows, season folders, episodes, movies and manual groups. It matches titles, file names, episode codes and original titles as you type, is accent- and case-insensitive, and works **offline** — metadata only enriches entries that are already there, it never adds results that cannot be played. Each row names its source
 - **User-added folders** — add a TV show or movie folder, get a TMDB poster and episode list; **deep recursive scan** (up to 5 levels) expands mixed containers so loose files aren't hidden behind parent cards
 - **Movie-part folders stay separate** — `Das Finale 01`–`04` each get their own card with the correct per-part TMDB match
 - **Manual grouping** — select cards (long-press) → Group → one grouped card with the name you choose; TV series still auto-group by name
@@ -183,6 +184,7 @@ Each thumbnail is linked — click any image to open it full size.
 - Aspect ratio picker: Fit, Crop, Stretch, 16:9, 4:3 (persists per video)
 - **Chapters** — MKV chapter ticks in the overflow menu, current chapter highlighted, tap to seek
 - **Playback speed** 0.25×–2× with refresh-rate matching on Android
+- **Frame interpolation (MPV, Android)** — Settings → Player → *Frame interpolation* picks a target rate (30 / 48 / 60 / 120 fps) and a quality (Sharp / Balanced / Smooth), so a 24 fps film plays at 60 fps with blended in-between frames and pans stop looking choppy. It is MPV-only by design: Media3 has no interpolation API, and producing the extra frames on the native engine would mean routing the decoder through our own GPU renderer — which would cost the Dolby Vision / HDR passthrough the native engine exists for. Apply it live from the player's ⋮ sheet, or set it once in Settings
 - **Pinch-to-zoom**, horizontal-swipe seek, double-tap-to-seek ±10 s
 - **Touch lock** — locks gestures during playback; tap once to reveal the unlock button
 - **Watched marks** — videos auto-mark as watched at the end; toggle manually per row
@@ -247,8 +249,12 @@ custom libmpv the HDR tone-map mode can convert to SDR intentionally. iOS does
 not run mpv; AetherEngine covers its own failures.
 
 For SMB sources the mpv engine gets the file over a tiny loopback HTTP/1.1
-server (`SmbHttpProxy.kt`, bound to `127.0.0.1`, byte-range aware) — jcifs-ng
-only talks to Media3-native `DataSource`s, and libmpv can't read `smb://`.
+server (`SmbHttpProxy.kt`, bound to `127.0.0.1`, byte-range aware). libmpv
+can't read `smb://` directly, and the server streams the bytes out of the
+**same libsmb2-backed reader with the parallel read-ahead ring the native
+engine uses**, so the share is read ahead of the playback while the socket is
+fed from memory — the engine never sees an SMB round-trip as a gap in the
+stream.
 
 ### Optional metadata providers
 
@@ -273,6 +279,15 @@ and no ratings, so an episode never resolves through it and rows show no star
 rather than an invented score. Selecting a provider there shows only that
 provider's credential field, with TheTVDB offered as an optional fallback.
 
+**r18.dev** is the other key-free provider, behind **Settings → Metadata →
+r18.dev**. It is a different catalogue from AVDb: it is keyed by the code in the
+file name (`SVFLA-012` and `SVFLA012` are the same record) rather than by free
+text, so a file whose name carries the code resolves to a rich record with the
+poster, the cast, the release date, the studio, the genres and the sample-video
+frames. Both are searched when either is enabled, and the one that matches
+supplies the artwork and synopsis — the details are never fetched from a
+different provider than the one that matched.
+
 Third parties can add a provider through the `MetadataProviderAdapter` seam
 (`lib/services/metadata_provider_adapter.dart`) instead of being taught to
 `TmdMovie` and the cache one at a time.
@@ -288,6 +303,7 @@ will play.
 - Leanback launcher banner
 - Dolby Vision + HDR10 passthrough to the TV panel
 - Audio passthrough for Atmos/DTS:X over HDMI
+- **Settings → Player is available on the stick** — engine picker, video decoder, auto-play next, Picture-in-picture and the on-screen badges are all reachable with the remote. Only the touch-only *Swipe gestures* row is hidden on TV
 - Tested on Amazon Fire TV Stick 4K (Fire OS 7.1)
 
 ## Engines Used
@@ -303,12 +319,12 @@ decoding, and a stable 4K 60 fps picture on a phone.**
 | **AetherEngine 6.38.x** | iOS / iPad | Native iOS playback built on AVPlayer + FFmpeg demux/decode. The AetherPlayerView exposes a `videoFormat` for `.hdr10 / .hdr10Plus / .dolbyVision`, the engine reads the container, FFmpeg fills in what AVPlayer can't (DTS / DTS-HD / TrueHD, MKV / WebM / TS / AVI containers), and the engine routes bitstream-audio over HDMI. | The only path that combines AVPlayer's hardware HDR / DV fast path on the panel with FFmpeg's container / codec coverage for non-Apple formats. iOS has no ExoPlayer port. |
 | **nextlib `media3ext`** | Android (FFmpeg audio) | The Android FFmpeg extension that adds `FfmpegAudioRenderer` for DTS / DTS-HD / TrueHD / FLAC. Wired into `DreamRenderersFactory` AFTER the stock audio renderer, so it acts as a fallback for the lossless codecs. | The same FFmpeg integration Nova Video Player uses. Video stays on hardware `MediaCodecVideoRenderer`; audio falls back to FFmpeg for the formats the OS can't decode. |
 | **Citadel (SwiftNIO SSH)** | iOS / iPad SFTP | Native SFTP client used by the FTP browser for SFTP playback (`FtpByteRangeSource`). | The only maintained Swift SSH client that compiles cleanly on iOS 17. |
-| **libsmb2** | iOS / iPad SMB | The C SMB 2/3 library behind **all** SMB on iOS: browsing, share listing, LAN discovery, stat and playback. Discovery does a subnet sweep plus a real IPC$ handshake to report dialect and server GUID; Discovery does a subnet sweep plus a real IPC$ handshake to report dialect and server GUID; playback serves the engine through a synchronous `smb2_pread` reader — no async-to-sync bridging, so the deadlock class the old iOS transport hit cannot recur. Vendored under `ios/Runner/libsmb2`, compiled by `ios/libsmb2_build.sh`. LGPL 2.1. |
-| **jcifs-ng** | Android SMB | The Java SMB 2/3 client used by the in-app SMB browser + `SmbDataSource` (custom ExoPlayer `DataSource` that streams from the share). | Nova's and CX Explorer's SMB library; measured ~75 MB/s vs ~4–6 MB/s for smbj on the NAS. |
+| **libsmb2** | **Android + iOS / iPad SMB reads** | The C SMB 2/3 library behind **all** SMB playback. On iOS it also does browsing, share listing, LAN discovery and stat: discovery is a subnet sweep plus a real IPC$ handshake to report dialect and server GUID, and playback serves the engine through a synchronous `smb2_pread` reader — no async-to-sync bridging, so the deadlock class the old iOS transport hit cannot recur. On **Android** the *read* path uses it too (a JNI bridge over the same vendored sources), for both the native engine and the MPV fallback. Vendored under `ios/Runner/libsmb2`, compiled for iOS by `ios/libsmb2_build.sh` and for Android by `android/app/src/main/cpp/CMakeLists.txt`. LGPL 2.1. |
+| **jcifs-ng** | Android SMB **browsing** | The Java SMB 2/3 client behind the in-app SMB browser (directory listing) and the small sidecar-subtitle fetch on Android. The bulk byte reads no longer go through it. | Nova's and CX Explorer's SMB library; measured ~75 MB/s vs ~4–6 MB/s for smbj on the NAS. Kept for browsing because it is pure Java and needs no native build step. |
 | **Media3 / DefaultHttpDataSource + OkHttp** | Android HTTP(S) | Standard Media3 HTTP source (with a custom trust-all OkHttp client for self-signed WebDAV). | Reuses Media3's mature HTTP implementation; the self-signed client is opt-in per server. |
 | **WebDAVByteRangeSource** (in `AetherEngineSMB`) | iOS / iPad WebDAV | A `ByteRangeSource` that serves every engine read as an independent HTTP `Range` request with the `Authorization` header, on a permissive or default-trust session. Wrapped in `BufferedSMBReader` for read-ahead. | AetherEngine's own HTTP stack can't carry auth headers or bypass TLS validation; this is the cleanest bridge between the WebDAV client and the engine. |
 | **media_kit + libmpv** (hardware-first `hwdec=auto-safe`, FFmpeg software fallback; video → **native SurfaceView**) | Android, user-chosen | **Second engine**: `Play with MPV` on the details screen (or `Try with MPV` on the Media3 error surface) starts a bundled libmpv that runs hardware decoders by default and drops to its own FFmpeg software decode when the hardware can't handle a stream — so files the native engine's hardware/software path can't open (12-bit HEVC 4:4:4, corrupt containers, unknown codecs) play through FFmpeg. Video renders into `MpvSurfaceView` (hybrid-composition platform view — same pattern as Media3; **no Flutter `Texture`**, which stuttered). media_kit `Player` is control-only (`media_kit_video` removed). Configures Android AudioTrack + FFmpeg PCM output; DTS / DTS-HD / TrueHD / E-AC3 / AC3 / FLAC / AAC sources can feed the platform Spatializer when the route stays 5.1/7.1. It observes `audio-out-params` and does not enable `audio-spdif`, so encoded passthrough is not reported as spatial. Pins the container-default audio track on open and restores the user's pick on resume. Ships `libmpv.so` via `media_kit_libs_android_video` — optionally overridden by a libplacebo/`gpu-next` build under `jniLibs/` (Gradle `pickFirsts`) for HDR tone-map. Android-only, so iOS doesn't pull in `Mpv.framework` (which breaks SideStore's `ldid` signer). | The user gets a second full player for anything Media3 can't decode, without giving up hardware decode or multichannel audio. Media3 remains the DV/HDR engine; MPV can tone-map to SDR when asked. iOS does not run mpv. |
-| **SmbHttpProxy** (in-app) | Android fallback over SMB | A tiny HTTP/1.1 server (ServerSocket accept loop, one daemon thread per connection, GET/HEAD + single `Range`) bound to `127.0.0.1` that hands out a jcifs-ng `SmbRandomAccessFile` per token. Idle handles are parked in an `ArrayDeque` per file. | jcifs-ng only talks to Media3-native `DataSource`s, and libmpv can't read `smb://` directly — the loopback bridge is the cleanest way to let the fallback engine stream SMB sources without re-plumbing the network stack. |
+| **SmbHttpProxy** (in-app) | Android fallback over SMB | A tiny HTTP/1.1 server (ServerSocket accept loop, one daemon thread per connection, GET/HEAD + single `Range`) bound to `127.0.0.1` that serves an SMB file to the MPV engine. The bytes come out of `SmbDataSource` — the same libsmb2 reader with the parallel read-ahead ring the native engine uses — so the NAS is never on the socket's critical path and the engine sees a continuous stream instead of a gap per SMB round-trip. | libmpv can't read `smb://` directly, and Media3-native `DataSource`s are not reachable from it, so a loopback HTTP bridge is the cleanest way to let the second engine stream a share. Reading *ahead* (instead of read-then-write per round-trip) is what keeps it from reporting "buffering". |
 
 ### Why is Media3 the primary engine — and how does mpv fit?
 
