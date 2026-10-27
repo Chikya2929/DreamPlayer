@@ -65,7 +65,7 @@ object SmbHttpProxy {
     // mid-stream SmbRandomAccessFile.read failures that truncated the HTTP body
     // and surfaced in mpv as "http: Stream ends prematurely". 256 KiB is the
     // empirically-safe SMB read size (same cap the WebDAV/SFTP readers use).
-    private const val CHUNK = 1024 * 1024  // 1 MiB — matches transaction_buf_size
+    private const val CHUNK = 256 * 1024  // 256 KiB — safe SMB read size
 
     // No body cap — streaming is already chunked at CHUNK (256 KiB) so memory
     // is bounded regardless of response size.  The old 16 MB cap caused ffmpeg/
