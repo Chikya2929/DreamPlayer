@@ -1067,11 +1067,10 @@ class ExoPlayerView(
         // first frame arrived from a partial buffer.
         val gen = pendingProbesGeneration
         handler.postDelayed({
-            // Chapters are NOT here — open() already fired them so the
-            // markers show up with the first frame instead of 2-3s later.
+            probeChapters(path, uri, headers, selfSigned, gen)
             probeHdr10Plus(path, uri, headers, gen)
             probeHdr10(path, uri, headers, gen)
-        }, 400)
+        }, 200)
     }
 
     private fun probeHdr10(path: String?, uri: String?, headers: Map<String, String>, generation: Int = openGeneration) {
@@ -1541,14 +1540,10 @@ class ExoPlayerView(
                         probeSource?.startsWith("ftp://", ignoreCase = true) == true ||
                         probeSource?.startsWith("sftp://", ignoreCase = true) == true
                     if (remoteProbe) {
-                        // Chapters run IMMEDIATELY even for remote sources: the
-                        // deferral below exists because the HDR probes open
-                        // several MediaExtractor/sample sessions and raced the
-                        // ring fill, but the chapter walk is one seekable
-                        // session and a few KB. Parking it meant the seekbar
-                        // markers and the chapter buttons only appeared 2-3s
-                        // after playback started, which read as "broken".
-                        probeChapters(path, uri, headers, allowSelfSigned)
+                        // Defer chapters to STATE_READY so the main playback
+                        // session is established first. Running them at open()
+                        // raced the ring fill and (with libsmb2) could fail
+                        // because the NAS rejected the extra concurrent session.
                         pendingProbes = Triple(path, uri, headers)
                         pendingProbesSelfSigned = allowSelfSigned
                         pendingProbesGeneration = openGeneration

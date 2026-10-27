@@ -24,6 +24,10 @@ object Smb2Native {
 
     @JvmStatic external fun fileSize(file: Long): Long
 
+    /// The server's negotiated MaxReadSize (bytes). libsmb2 caps every read
+    /// request at this value, so a larger readAt returns a short read.
+    @JvmStatic external fun maxReadSize(file: Long): Int
+
     @JvmStatic external fun readAt(file: Long, offset: Long, buf: ByteArray, len: Int): Int
 
     @JvmStatic external fun openDir(session: Long, path: String): Long

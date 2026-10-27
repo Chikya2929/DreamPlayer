@@ -95,13 +95,13 @@ object SmbEngine {
         // room to batch SMB2 read responses.
         p["jcifs.smb.client.rcv_buf_size"] = "1048576"
         p["jcifs.smb.client.snd_buf_size"] = "1048576"
-        // transaction_buf_size is the cap on a single SMB2 READ request: the
-        // two above only size the TCP socket, the actual read is still sliced
-        // at this value, so leaving it at the 64 KB default is what makes a
-        // large 4K file crawl even on a fast LAN. 1 MB matches the socket
-        // buffers and the typical NAS MaxReadSize (8 MB was rejected by the
-        // NAS with STATUS_INVALID_PARAMETER — do not raise past MaxReadSize).
-        p["jcifs.smb.client.transaction_buf_size"] = "1048576"
+        // transaction_buf_size is deliberately LEFT AT THE DEFAULT (65535).
+        // It is the cap on a single SMB2 READ request, and the NAS refuses
+        // reads larger than its negotiated MaxReadSize with
+        // STATUS_INVALID_PARAMETER — 1 MB was already too big for this NAS.
+        // jcifs-ng now only browses directories and fetches small sidecar
+        // files (the playback read path is libsmb2), so the default costs
+        // nothing and cannot provoke a rejected read.
         // More credits = more in-flight reads per session = better pipelining
         // on high-latency Wi-Fi.
         p["jcifs.smb.client.maxCredits"] = "128"

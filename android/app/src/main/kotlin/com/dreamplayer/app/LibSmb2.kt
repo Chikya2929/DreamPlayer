@@ -63,6 +63,11 @@ class LibSmb2File(
 ) {
     val size: Long get() = Smb2Native.fileSize(handle)
 
+    /// The server's negotiated MaxReadSize. libsmb2 caps EVERY read request at
+    /// this value, so a `readAt` for more returns only this many bytes (a
+    /// short read, not an error). 0 means "not negotiated".
+    val maxReadSize: Int get() = Smb2Native.maxReadSize(handle)
+
     fun readAt(offset: Long, buf: ByteArray, len: Int): Int {
         if (len <= 0) return 0
         val n = Smb2Native.readAt(handle, offset, buf, len)

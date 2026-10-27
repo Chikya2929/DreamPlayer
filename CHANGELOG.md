@@ -37,6 +37,16 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Fixed
 
+- **MPV no longer stalls on files on a network share.** Playing a file from
+  an SMB share with the MPV engine spent its time in "buffering", and on some
+  servers it stopped after the first request. Two things were wrong: the
+  bridge that exposes a share to MPV read from the network and wrote to the
+  player in the same loop, so every round-trip to the server looked like a
+  gap in the stream, and a file was being opened twice on the same connection,
+  which made the server-side session leak until no new connection could be
+  opened at all. The bridge now reads ahead in the background — the same
+  buffer the native engine uses — and opens each file exactly once. Both
+  engines play from the share without buffering.
 - **The Player settings section was missing on Fire OS.** The whole section
   was hidden on TVs since the Android TV work, because it was written when the
   section held only the touch-only swipe-gestures toggle. That took the

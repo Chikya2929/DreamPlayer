@@ -9,10 +9,18 @@ import java.io.IOException
  * cursor and `read()` issues a pread at that cursor. This keeps the existing
  * SmbDataSource / SmbHttpProxy / chapter-probe code paths working unchanged
  * while moving the actual I/O onto libsmb2.
+ *
+ * IMPORTANT: pass the [LibSmb2File] you already opened as [existing]. Opening
+ * the file twice leaves a second `smb2fh` open on the same tree, and the
+ * server then refuses the TREE_DISCONNECT with STATUS_BUSY — libsmb2 skips
+ * the socket close in that case, so the whole SMB session (TCP connection
+ * included) leaks. A handful of leaked sessions exhausts the NAS's per-user
+ * session limit and every later connect fails.
  */
 class LibSmb2RandomAccessFile(
     private val session: LibSmb2Session,
     private val path: String,
+    existing: LibSmb2File? = null,
 ) {
     private var file: LibSmb2File? = null
     private var closed = false
@@ -20,7 +28,7 @@ class LibSmb2RandomAccessFile(
     private val lock = Object()
 
     init {
-        file = session.openFile(path)
+        file = existing ?: session.openFile(path)
             ?: throw IOException("libsmb2: could not open $path (${session.error()})")
     }
 

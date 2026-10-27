@@ -1311,6 +1311,67 @@ video drew at 2x and covered half the picture. It is now `no`.
 - **In-app SMB / LAN playback: BOTH platforms (0.5.1)**. The Android in-app SMB server browser (`smb_screen.dart`, `smb_client.dart`, `SMBClient.kt`, `SmbDataSource.kt`, channel `dreamplayer/smb`, jcifs-ng) is unchanged. iOS, withdrawn in 2026-08 (AMSMB2 was slow, would not play every file, and an audio-track switch could crash), is back: browsing on pure-Swift `SMBClient`, **discovery and playback on libsmb2**, with playback fed to AetherEngine through a synchronous `smb2_pread` `IOReader`. See "iOS in-app SMB on libsmb2" in the roadmap section for the full architecture, the path/resume-key shapes, and the resume + audio-track interaction. `BufferedSMBReader.swift` stays for WebDAV/FTP read-ahead and the `AetherEngineSMB` SPM product stays for WebDAV's `ByteRangeSource`.
   **Android lessons retained**: jcifs-ng's streaming read size is bound by three interlocking properties (`snd_buf_size`/`rcv_buf_size`/`transaction_buf_size`, defaults 65535); raising only the first two did nothing, and raising `transaction_buf_size` to 8 MiB made the NAS reject reads with `STATUS_INVALID_PARAMETER`. Do not raise buffers past the NAS's negotiated `MaxReadSize`.
 
+### Android SMB on libsmb2 (2026-10-27) — the read path moved off jcifs-ng
+
+**Browsing still uses jcifs-ng; the READ path does not.** `SmbDataSource` (Media3) and
+`SmbHttpProxy` (the MPV loopback bridge) read through **libsmb2** over a JNI bridge
+(`android/app/src/main/cpp/smb2_jni.c` → `Smb2Native` → `LibSmb2Session`/`LibSmb2File` →
+`LibSmb2RandomAccessFile`). The vendored C sources are the same ones iOS uses
+(`ios/Runner/libsmb2/`), compiled for Android by `android/app/src/main/cpp/CMakeLists.txt`
+— no prebuilt binary is committed. `jcifs-ng` is now only the **directory browser** and
+the small **sidecar fetch** path.
+
+**Four traps, each of which shipped a broken build. Read this before touching the read path.**
+
+1. **A second `smb2_open` on one session LEAKS THE WHOLE SMB SESSION.** libsmb2 refuses
+   `TREE_DISCONNECT` with `STATUS_BUSY` while a file handle is still open on the tree, and
+   its `disconnect_cb_1` returns early in that case — **the socket is never closed**. The
+   TCP connection and the server-side session then live for the rest of the process, and
+   the NAS's per-user session limit is small: after a handful of leaks every new connect
+   fails and playback dies with *"one request served, then nothing"*. That was exactly the
+   MPV symptom.    `LibSmb2RandomAccessFile` therefore takes the ALREADY-OPENED
+   `LibSmb2File` (`LibSmb2RandomAccessFile(session, path, file)`) — **never open the file
+   twice on one session**. `Smb2Native.closeSession` also force-closes the socket itself
+   via `smb2_get_fd()` when libsmb2 left it open, so a leak can never outlive one session.
+   That force-close is a fallback, not a parallel path: on the success path libsmb2 closes
+   the fd itself and invalidates it, so the fallback never double-closes a socket number
+   that another thread may already have reused.
+
+
+2. **libsmb2 caps EVERY read at the negotiated `MaxReadSize`, and returns a SHORT read.**
+   `smb2_pread_async` truncates `count` to `smb2->max_read_size` and issues **one** READ;
+   `smb2_pread` does not loop. Asking for 4 MiB when the server allows 64 KiB returns
+   **64 KiB — not an error**. A caller that assumes "I asked for N, I got N" silently
+   starves. `Smb2Native.maxReadSize(file)` exposes the negotiated value (the iOS wrapper
+   `LibSMB2.m` uses the same accessor and reads in `maxReadSize` chunks).
+
+3. **jcifs-ng's `transaction_buf_size` must stay ≤ the server's `MaxReadSize`.** 8 MiB was
+   rejected outright by this NAS with `STATUS_INVALID_PARAMETER`; 1 MiB was accepted. It is
+   now left at the **default 65535** because jcifs only browses directories and fetches
+   small sidecars — the read path no longer needs it, and the default can never provoke a
+   rejected read. (The old MPV proxy also had an **infinite handle-swap loop**: on a read
+   error it opened a fresh handle and re-read the same offset forever, never writing a
+   byte to the socket. That loop is gone.)
+
+4. **The MPV proxy MUST read ahead, or mpv sees every SMB round-trip as a stream gap.**
+   The old proxy read from SMB and wrote to the socket in the same loop, so the NAS sat on
+   the socket's critical path and mpv reported *buffering*. `SmbHttpProxy` now streams out
+   of **`SmbDataSource`** — the same ring buffer + parallel prefetch threads Media3 uses —
+   so the socket is fed from memory while the NAS is read ahead, concurrently. The proxy's
+   per-connection budget is a **cap** (`RING_CAP_BYTES` 24 MiB, `PREFETCH_THREADS` 3), so
+   the heap-aware `BufferTuning` still lowers it on the Fire TV Stick's 192 MB heap.
+
+**Measured on the OnePlus CPH2573 (Wi-Fi, Samba server on the LAN, 2026-10-27):** each of
+the 6 prefetch threads sustains ~4.3 MB/s (a single 4 MiB READ takes ~900 ms), so the
+aggregate is ~26 MB/s — far above any realistic 4K bitrate. Both engines play without
+buffering; **user-verified**.
+
+**Also worth knowing:** `SmbDataSource.openSmb(serverId, share, path, position, length)` is
+a public entry point that skips the `smb://` URI round-trip (the URI would have to
+percent-encode the path and `Uri.pathSegments` drops empty segments). The MPV proxy uses it
+directly. The chapter probe for REMOTE sources is deferred to `STATE_READY` — running it
+during `open()` raced the ring fill and opened a second concurrent SMB session.
+
 ## Roadmap
 
 ### SMB / network shares (Android + iPad)

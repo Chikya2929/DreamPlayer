@@ -1,12 +1,13 @@
 0.5.5
 
-New: frame interpolation for the MPV engine (30/48/60/120 fps), a key-free
-film catalogue matched by code, and a warning before you push the volume or
-the brightness too far.
+New: frame interpolation for MPV (30/48/60/120 fps), a key-free film
+catalogue matched by code, and a warning before you push volume or
+brightness too far.
 
-Improved: the Get info and Fix match dialogs search those catalogues, and a
-matched film keeps its own poster and synopsis.
+Improved: Get info and Fix match search those catalogues, and a matched
+film keeps its own poster and synopsis.
 
-Fixed: the transport buttons read previous chapter, back 10 s, play, forward
-10 s, next. The Player settings section is back on Fire OS, so you can pick
-the engine on the stick.
+Fixed: MPV no longer stalls on network-share files. The transport buttons
+read previous chapter, back 10 s, play, forward 10 s, next. The Player
+settings section is back on Fire OS, so you can pick the engine on the
+stick.

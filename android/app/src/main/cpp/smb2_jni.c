@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <sys/prctl.h>
 #include <smb2/smb2.h>
 
@@ -116,13 +117,41 @@ Java_com_dreamplayer_app_Smb2Native_closeSession(JNIEnv *env, jclass cls, jlong 
     Smb2Session *s = to_session(session);
     if (!s) return;
     if (s->ctx) {
-        if (s->connected) smb2_disconnect_share(s->ctx);
+        if (s->connected) {
+            smb2_disconnect_share(s->ctx);
+            /* libsmb2 closes the socket only when the TREE_DISCONNECT
+             * succeeds: on STATUS_BUSY (the server refuses while a file
+             * handle is still open on that tree) its disconnect_cb_1 returns
+             * early and NEVER closes the fd. The TCP connection and the
+             * server-side session then stay alive for the life of the
+             * process — and the NAS's per-user session limit is small, so
+             * after a handful of leaked sessions every new connect fails.
+             * That is exactly what broke the MPV loopback proxy: one
+             * request served, then nothing. Close the socket ourselves when
+             * libsmb2 left it open. */
+            t_socket fd = smb2_get_fd(s->ctx);
+            if (fd >= 0) {
+                close(fd);
+            }
+        }
         /* smb2_destroy_context crashes in smb2_free_pdu on some contexts
          * (heap corruption from pending PDUs). Leak the context instead —
          * the OS reclaims it when the app exits. */
         s->ctx = NULL;
     }
     free(s->host); free(s->share); free(s->user); free(s->pass); free(s);
+}
+
+/* The server's negotiated MaxReadSize. libsmb2 caps EVERY read request at
+ * this value (smb2_pread_async truncates `count` to it and issues a single
+ * READ), so a caller asking for more than this gets a SHORT read, not an
+ * error. Knowing the value is what lets the read-ahead size its chunks to
+ * one round-trip instead of silently wasting a 4 MiB request for 64 KiB. */
+JNIEXPORT jint JNICALL
+Java_com_dreamplayer_app_Smb2Native_maxReadSize(JNIEnv *env, jclass cls, jlong file) {
+    Smb2File *sf = to_file(file);
+    if (!sf || !sf->ctx) return 0;
+    return (jint)smb2_get_max_read_size(sf->ctx);
 }
 
 JNIEXPORT jstring JNICALL
@@ -185,12 +214,6 @@ Java_com_dreamplayer_app_Smb2Native_fileSize(JNIEnv *env, jclass cls, jlong file
     memset(&st, 0, sizeof(st));
     if (smb2_fstat(sf->ctx, sf->fh, &st) < 0) return -1;
     return (jlong)st.smb2_size;
-}
-
-JNIEXPORT jint JNICALL
-Java_com_dreamplayer_app_Smb2Native_maxReadSize(JNIEnv *env, jclass cls, jlong file) {
-    /* libsmb2 doesn't expose maxReadSize directly on fh; return a safe 1 MiB */
-    return 1024 * 1024;
 }
 
 JNIEXPORT jint JNICALL
