@@ -232,7 +232,9 @@ internal object Mp4Chapters {
         val remotePath = if (segments.size > 1) segments.subList(1, segments.size).joinToString("/") else ""
         val creds = SmbStore.resolve(context, serverId) ?: return null
         return try {
-            val session = LibSmb2Session.open(creds.host, creds.port, creds.username, creds.password, creds.domain, share)
+            val user = if (creds.anonymous) "guest" else creds.username
+            val pass = if (creds.anonymous) "" else creds.password
+            val session = LibSmb2Session.open(creds.host, creds.port, user, pass, creds.domain, share)
                 ?: return null
             session.openFile(remotePath) ?: run { session.close(); return null }
             LibSmb2RandomAccessFile(session, remotePath)

@@ -540,11 +540,8 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         // prefetch thread and then freeing it on close() is a use-after-free
         // that corrupts the heap and crashes the next smb2_open.
         val handles = mutableListOf<LibSmb2RandomAccessFile?>()
-        // t0 reuses the first secondary; if none, open one.
-        val first = secondaries.getOrNull(0) ?: openSecondaryHandle()
-        handles.add(first)
-        for (i in 1 until BufferTuning.prefetchThreads) {
-            handles.add(secondaries.getOrNull(i - 1) ?: openSecondaryHandle())
+        for (i in 0 until 2) {
+            handles.add(openSecondaryHandle())
         }
         for (i in 0 until 2) {
             val handle = handles.getOrNull(i)

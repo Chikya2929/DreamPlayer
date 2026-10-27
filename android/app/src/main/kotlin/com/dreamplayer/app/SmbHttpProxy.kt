@@ -208,8 +208,10 @@ object SmbHttpProxy {
     private fun openRaf(handle: Handle, context: Context): LibSmb2RandomAccessFile {
         val creds = SmbStore.resolve(context, handle.serverId)
             ?: throw IOException("Unknown SMB server ${handle.serverId}")
+        val user = if (creds.anonymous) "guest" else creds.username
+        val pass = if (creds.anonymous) "" else creds.password
         val session = LibSmb2Session.open(
-            creds.host, creds.port, creds.username, creds.password,
+            creds.host, creds.port, user, pass,
             creds.domain, handle.share,
         ) ?: throw IOException("libsmb2: could not connect to ${handle.share} on ${creds.host}")
         session.openFile(handle.path) ?: run { session.close(); throw IOException("libsmb2: could not open ${handle.path} (${session.error()})") }
