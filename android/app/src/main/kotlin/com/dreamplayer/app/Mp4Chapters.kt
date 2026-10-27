@@ -8,8 +8,7 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
-import jcifs.smb.SmbFile
-import jcifs.smb.SmbRandomAccessFile
+import com.dreamplayer.app.LibSmb2RandomAccessFile
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -223,7 +222,7 @@ internal object Mp4Chapters {
             .build()
     }
 
-    private fun openSmbFile(smbUri: String, context: Context): SmbRandomAccessFile? {
+    private fun openSmbFile(smbUri: String, context: Context): LibSmb2RandomAccessFile? {
         val uri = android.net.Uri.parse(smbUri) ?: return null
         if (!"smb".equals(uri.scheme, ignoreCase = true)) return null
         val serverId = uri.host ?: return null
@@ -232,10 +231,14 @@ internal object Mp4Chapters {
         val share = segments[0]
         val remotePath = if (segments.size > 1) segments.subList(1, segments.size).joinToString("/") else ""
         val creds = SmbStore.resolve(context, serverId) ?: return null
-        val base = "smb://${creds.host}:${creds.port}/$share"
-        val url = if (remotePath.isEmpty()) base else "$base/$remotePath"
-        val f = SmbFile(url, creds.context())
-        return SmbRandomAccessFile(f, "r")
+        return try {
+            val session = LibSmb2Session.open(creds.host, creds.port, creds.username, creds.password, creds.domain, share)
+                ?: return null
+            session.openFile(remotePath) ?: run { session.close(); return null }
+            LibSmb2RandomAccessFile(session, remotePath)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // ---- Seekable reader abstraction ----
@@ -256,7 +259,7 @@ internal object Mp4Chapters {
         override fun length(): Long = try { raf.length() } catch (_: Exception) { Long.MAX_VALUE }
     }
 
-    private class SmbReader(private val raf: SmbRandomAccessFile) : SeekableReader {
+    private class SmbReader(private val raf: LibSmb2RandomAccessFile) : SeekableReader {
         override fun read(): Int = raf.read()
         override fun readFully(buf: ByteArray) = raf.readFully(buf)
         override fun seek(pos: Long) = raf.seek(pos)

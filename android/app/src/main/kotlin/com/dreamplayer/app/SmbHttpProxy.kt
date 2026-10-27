@@ -10,8 +10,8 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
-import jcifs.smb.SmbFile
-import jcifs.smb.SmbRandomAccessFile
+import com.dreamplayer.app.LibSmb2RandomAccessFile
+import com.dreamplayer.app.LibSmb2Session
 import kotlin.concurrent.thread
 import kotlin.concurrent.withLock
 
@@ -27,7 +27,7 @@ import kotlin.concurrent.withLock
  * connection. It supports GET/HEAD + single `Range` (`bytes=start-end`,
  * `bytes=start-`, `bytes=-suffix`); every connection is closed after its
  * response. Reads are serialized per file via a [ReentrantLock] because
- * `SmbRandomAccessFile` is not thread-safe.
+ * `LibSmb2RandomAccessFile` is not thread-safe.
  */
 object SmbHttpProxy {
 
@@ -42,12 +42,12 @@ object SmbHttpProxy {
         /// and abort instead of streaming into a dead socket.
         @Volatile var closed: Boolean = false
 
-        /// Idle `SmbRandomAccessFile`s ready for reuse. One handle per in-flight
+        /// Idle `LibSmb2RandomAccessFile`s ready for reuse. One handle per in-flight
         /// request (so no shared seek position), but finished handles are parked
         /// here instead of closed — opening an SMB file costs a tree-connect +
         /// create round-trip each time, and mpv's probe fires ~15 range requests
         /// back to back, so re-opening every time is what made startup slow.
-        val idle = ArrayDeque<SmbRandomAccessFile>()
+        val idle = ArrayDeque<LibSmb2RandomAccessFile>()
         val idleLock = ReentrantLock()
     }
 
@@ -62,7 +62,7 @@ object SmbHttpProxy {
     // jcifs-ng streaming reads are bound by the NAS's negotiated MaxReadSize
     // (snd/rcv/transaction buf, defaults 65535; larger requests get truncated or
     // rejected — see the "Lesson learned on-device" note). 1 MiB reads caused
-    // mid-stream SmbRandomAccessFile.read failures that truncated the HTTP body
+    // mid-stream LibSmb2RandomAccessFile.read failures that truncated the HTTP body
     // and surfaced in mpv as "http: Stream ends prematurely". 256 KiB is the
     // empirically-safe SMB read size (same cap the WebDAV/SFTP readers use).
     private const val CHUNK = 1024 * 1024  // 1 MiB — matches transaction_buf_size
@@ -161,12 +161,12 @@ object SmbHttpProxy {
         }
     }
 
-    /// Leases an `SmbRandomAccessFile` for one request: an idle handle when one
+    /// Leases an `LibSmb2RandomAccessFile` for one request: an idle handle when one
     /// is parked, otherwise a fresh open. Handles are NEVER shared between
     /// concurrent requests — ffmpeg's HTTP demuxer fires many overlapping range
     /// requests and a shared handle means each request's `seek()` clobbers the
     /// others mid-read (garbage bytes → decoder starvation → ANR).
-    private fun leaseRaf(handle: Handle, context: Context): SmbRandomAccessFile {
+    private fun leaseRaf(handle: Handle, context: Context): LibSmb2RandomAccessFile {
         handle.idleLock.withLock {
             while (handle.idle.isNotEmpty()) {
                 val raf = handle.idle.removeFirst()
@@ -187,7 +187,7 @@ object SmbHttpProxy {
 
     /// Parks a finished handle for reuse, or closes it when the pool is full or
     /// the session is gone.
-    private fun releaseRaf(handle: Handle, raf: SmbRandomAccessFile) {
+    private fun releaseRaf(handle: Handle, raf: LibSmb2RandomAccessFile) {
         if (!handle.closed) {
             val parked = handle.idleLock.withLock {
                 if (handle.idle.size < MAX_IDLE) {
@@ -205,12 +205,15 @@ object SmbHttpProxy {
         }
     }
 
-    private fun openRaf(handle: Handle, context: Context): SmbRandomAccessFile {
+    private fun openRaf(handle: Handle, context: Context): LibSmb2RandomAccessFile {
         val creds = SmbStore.resolve(context, handle.serverId)
             ?: throw IOException("Unknown SMB server ${handle.serverId}")
-        val base = "smb://${creds.host}:${creds.port}/${handle.share}"
-        val url = if (handle.path.isEmpty()) base else "$base/${handle.path}"
-        return SmbRandomAccessFile(SmbFile(url, creds.context()), "r")
+        val session = LibSmb2Session.open(
+            creds.host, creds.port, creds.username, creds.password,
+            creds.domain, handle.share,
+        ) ?: throw IOException("libsmb2: could not connect to ${handle.share} on ${creds.host}")
+        session.openFile(handle.path) ?: run { session.close(); throw IOException("libsmb2: could not open ${handle.path} (${session.error()})") }
+        return LibSmb2RandomAccessFile(session, handle.path)
     }
 
     private fun serve(sock: Socket) {
@@ -276,18 +279,18 @@ object SmbHttpProxy {
         }
     }
 
-    /// Streams the requested byte range, returning the `SmbRandomAccessFile`
+    /// Streams the requested byte range, returning the `LibSmb2RandomAccessFile`
     /// the caller should release. On a persistent SMB read failure it swaps in a
     /// freshly-opened handle (which it closes/parked itself via [releaseRaf])
     /// and returns null so the caller parks nothing and skips the dead original.
     private fun streamResponse(
         sock: Socket,
         handle: Handle,
-        raf: SmbRandomAccessFile,
+        raf: LibSmb2RandomAccessFile,
         method: String,
         rangeHeader: String?,
         context: Context,
-    ): SmbRandomAccessFile? {
+    ): LibSmb2RandomAccessFile? {
         val total = handle.size
         var start: Long
         var end: Long
@@ -340,7 +343,7 @@ object SmbHttpProxy {
             if (handle.closed) break
             val want = minOf(remaining, CHUNK.toLong()).toInt()
             var n = 0
-            // Retry a bounded number of recoverable reads. SmbRandomAccessFile
+            // Retry a bounded number of recoverable reads. LibSmb2RandomAccessFile
             // can transiently fail mid-stream (NAS session hiccup, read timeout);
             // returning -1 immediately would truncate the HTTP body while
             // Content-Length still promises full bytes -> mpv reports "http:

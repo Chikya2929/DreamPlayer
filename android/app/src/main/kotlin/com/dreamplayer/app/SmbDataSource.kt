@@ -11,8 +11,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
-import jcifs.smb.SmbFile
-import jcifs.smb.SmbRandomAccessFile
+import com.dreamplayer.app.LibSmb2RandomAccessFile
 import java.io.IOException
 
 /// ExoPlayer DataSource that streams a file straight off an SMB share
@@ -105,8 +104,10 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
     }
 
     // ---- SMB connection state (guarded by smbLock) ----
-    private var file: SmbFile? = null
-    private var raf: SmbRandomAccessFile? = null
+    // libsmb2: one session owns one smb2_context + one tree connection.
+    private var session: LibSmb2Session? = null
+    private var libFile: LibSmb2File? = null
+    private var raf: LibSmb2RandomAccessFile? = null
     private var fileKey: String? = null
     private var openedUri: Uri? = null
     private var httpDataSource: HttpDataSource? = null
@@ -179,7 +180,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                 savedCreds = creds
                 savedShare = shareName
                 savedPath = remotePath
-                if (file == null || fileKey != key) {
+                if (session == null || fileKey != key) {
                     val t0 = System.nanoTime()
                     size = connectLocked(key, creds, shareName, remotePath)
                     val ms = (System.nanoTime() - t0) / 1_000_000
@@ -211,7 +212,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                 remaining0 > BufferTuning.chunkBytes.toLong() * 2 &&
                 (dataSpec.length == C.LENGTH_UNSET.toLong() ||
                     dataSpec.length > BufferTuning.chunkBytes.toLong())
-            val secondaries = ArrayList<SmbRandomAccessFile?>(BufferTuning.prefetchThreads)
+            val secondaries = ArrayList<LibSmb2RandomAccessFile?>(BufferTuning.prefetchThreads)
             if (needPrefetch) {
                 try {
                     for (i in 1 until BufferTuning.prefetchThreads) {
@@ -465,22 +466,31 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         path: String,
     ): Long {
         closeHandles()
-        val f = SmbFile(smbUrl(creds, share, path), creds.context())
-        val r = SmbRandomAccessFile(f, "r")
-        file = f
+        val s = LibSmb2Session.open(
+            creds.host, creds.port, creds.username, creds.password,
+            creds.domain, share,
+        ) ?: throw IOException("libsmb2: could not connect to $share on ${creds.host}")
+        val f = s.openFile(path) ?: run { s.close(); throw IOException("libsmb2: could not open $path (${s.error()})") }
+        val r = LibSmb2RandomAccessFile(s, path)
+        session = s
+        libFile = f
         raf = r
         fileKey = key
         cachedFileSize = r.length()
         return cachedFileSize
     }
 
-    private fun openSecondaryHandle(): SmbRandomAccessFile? {
+    private fun openSecondaryHandle(): LibSmb2RandomAccessFile? {
         val creds = savedCreds ?: return null
         val share = savedShare ?: return null
         val path = savedPath ?: return null
         return try {
-            val f = SmbFile(smbUrl(creds, share, path), creds.context())
-            SmbRandomAccessFile(f, "r")
+            val s = LibSmb2Session.open(
+                creds.host, creds.port, creds.username, creds.password,
+                creds.domain, share,
+            ) ?: return null
+            s.openFile(path) ?: run { s.close(); return null }
+            LibSmb2RandomAccessFile(s, path)
         } catch (e: Exception) {
             Log.w(TAG, "secondary handle open failed: ${e.message}")
             null
@@ -520,7 +530,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
 
     /// Starts prefetch threads with secondary handles that were already opened
     /// OUTSIDE ringLock (see [open]). Caller holds ringLock.
-    private fun startPrefetchers(secondaries: List<SmbRandomAccessFile?>) {
+    private fun startPrefetchers(secondaries: List<LibSmb2RandomAccessFile?>) {
         for (i in 0 until BufferTuning.prefetchThreads) {
             val handle = if (i == 0) null else secondaries.getOrNull(i - 1)
             val t = Thread { prefetchLoop(prefetchGen, i, handle) }
@@ -532,7 +542,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         Log.i(TAG, "started ${BufferTuning.prefetchThreads} prefetch threads")
     }
 
-    private fun prefetchLoop(gen: Long, threadIdx: Int, secondaryHandle: SmbRandomAccessFile?) {
+    private fun prefetchLoop(gen: Long, threadIdx: Int, secondaryHandle: LibSmb2RandomAccessFile?) {
         // Per-thread temp buffer — SMB reads go here first, then get copied
         // into the ring inside ringLock (after epoch check). This prevents
         // stale writes from a killed/restarted thread from corrupting the ring.
@@ -681,28 +691,39 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                     synchronized(smbLock) {
                         try { raf?.close() } catch (_: Exception) {}
                         raf = null
+                        try { session?.close() } catch (_: Exception) {}
+                        session = null
                         val c = savedCreds
                         val sh = savedShare
                         val p = savedPath
                         if (c != null && sh != null && p != null) {
                             try {
-                                raf = SmbRandomAccessFile(SmbFile(smbUrl(c, sh, p), c.context()), "r")
-                                Log.i(TAG, "t0 reconnected after read error")
+                                val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
+                                if (ns != null) {
+                                    ns.openFile(p)
+                                    session = ns
+                                    raf = LibSmb2RandomAccessFile(ns, p)
+                                    Log.i(TAG, "t0 reconnected after read error")
+                                }
                             } catch (ex: Exception) {
                                 Log.w(TAG, "t0 reconnect failed: ${ex.message}")
                             }
                         }
                     }
                 } else {
-                    try { handle?.close() } catch (_: Exception) {}
+                    try { (handle as? LibSmb2RandomAccessFile)?.close() } catch (_: Exception) {}
                     val c = savedCreds
                     val sh = savedShare
                     val p = savedPath
                     handle = if (c != null && sh != null && p != null) {
                         try {
-                            SmbRandomAccessFile(SmbFile(smbUrl(c, sh, p), c.context()), "r").also {
-                                Log.i(TAG, "t$threadIdx reconnected after read error")
-                            }
+                            val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
+                            if (ns != null) {
+                                ns.openFile(p)
+                                LibSmb2RandomAccessFile(ns, p).also {
+                                    Log.i(TAG, "t$threadIdx reconnected after read error")
+                                }
+                            } else null
                         } catch (ex: Exception) {
                             Log.w(TAG, "t$threadIdx reconnect failed: ${ex.message}")
                             null
@@ -740,7 +761,8 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                     val p = savedPath
                     if (c != null && sh != null && p != null) {
                         try {
-                            handle = SmbRandomAccessFile(SmbFile(smbUrl(c, sh, p), c.context()), "r")
+                            val ns = LibSmb2Session.open(c.host, c.port, c.username, c.password, c.domain, sh)
+                            handle = if (ns != null) { ns.openFile(p); LibSmb2RandomAccessFile(ns, p) } else null
                             Log.i(TAG, "t$threadIdx recovered handle after ${handleAttempts}s")
                             break // got a handle, rejoin the read loop
                         } catch (_: Exception) { /* retry next iteration */ }
@@ -757,8 +779,10 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
     private fun closeHandles() {
         try { raf?.close() } catch (_: Exception) {}
         raf = null
-        try { file?.close() } catch (_: Exception) {}
-        file = null
+        try { libFile?.close() } catch (_: Exception) {}
+        libFile = null
+        try { session?.close() } catch (_: Exception) {}
+        session = null
     }
 
     private fun idx(abs: Long): Int = (abs % ringSize.toLong()).toInt()
