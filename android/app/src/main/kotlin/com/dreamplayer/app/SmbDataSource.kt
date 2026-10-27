@@ -265,7 +265,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
                 dataSpec.length != C.LENGTH_UNSET.toLong() &&
                     dataSpec.length in 1 until remaining -> dataSpec.length // bounded read
                 remaining < BufferTuning.chunkBytes -> remaining // near-EOF: whole tail
-                else -> minOf(BufferTuning.chunkBytes.toLong(), remaining) // head prefill
+                else -> minOf(1024L * 1024, remaining) // head prefill: 1MB for fast startup
             }
             if (fillWant > 0L) {
                 val tmp = ByteArray(fillWant.toInt())
@@ -540,10 +540,10 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
         // prefetch thread and then freeing it on close() is a use-after-free
         // that corrupts the heap and crashes the next smb2_open.
         val handles = mutableListOf<LibSmb2RandomAccessFile?>()
-        for (i in 0 until 2) {
+        for (i in 0 until BufferTuning.prefetchThreads) {
             handles.add(openSecondaryHandle())
         }
-        for (i in 0 until 2) {
+        for (i in 0 until BufferTuning.prefetchThreads) {
             val handle = handles.getOrNull(i)
             val t = Thread { prefetchLoop(prefetchGen, i, handle) }
             t.isDaemon = true
@@ -551,7 +551,7 @@ class SmbDataSource(private val context: Context) : BaseDataSource(true) {
             t.start()
             prefetchers.add(t)
         }
-        Log.i(TAG, "started 2 prefetch threads")
+        Log.i(TAG, "started ${BufferTuning.prefetchThreads} prefetch threads")
     }
 
     private fun prefetchLoop(gen: Long, threadIdx: Int, secondaryHandle: LibSmb2RandomAccessFile?) {
