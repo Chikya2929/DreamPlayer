@@ -35,12 +35,15 @@ true of the intended build but not of the one that was reviewed. Verify with
 
 ---
 
-## Next release
-
-*(Unreleased. This section is rewritten with the version number when the build
-is cut, and it lists only what iPhone and iPad users get.)*
+## 0.5.5
 
 New:
+• List or Grid view in the shared-folder browsers. The three-dot menu at the
+  top right of the SMB, WebDAV, FTP, DLNA and Jellyfin browsers now has a
+  View entry: List for the familiar rows, Grid for tiles with artwork —
+  folders, films and episode images. The choice applies to every one of those
+  browsers at once and is remembered.
+
 • Pushing the screen brightness past 80% now flashes a short warning that it
   drains the battery faster, the first time you cross that point.
 
