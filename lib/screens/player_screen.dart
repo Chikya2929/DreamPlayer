@@ -11,7 +11,6 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/hdr_format.dart';
 import '../models/video_item.dart';
-import '../services/cast_manager.dart';
 import '../services/continue_watching.dart';
 import '../services/badge_prefs.dart';
 import '../services/audio_track_store.dart';
@@ -64,7 +63,6 @@ import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
 import '../utils/thermal_policy.dart';
 import '../services/thermal_monitor.dart';
-import '../widgets/cast_button.dart';
 import '../widgets/airplay_button.dart';
 import '../widgets/format_chip.dart';
 import '../widgets/gesture_warning_pill.dart';
@@ -307,7 +305,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration _position = Duration.zero;
 
   /// True while the video plays on a Cast receiver instead of on the phone.
-  bool _casting = false;
   Duration _duration = Duration.zero;
   Duration _buffered = Duration.zero;
   bool _playing = false;
@@ -557,28 +554,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (mounted) _syncOrientationFromPlatform();
     });
     if (!_inTests) {
-      CastManager.instance.start();
-      CastManager.instance.addListener(_onCastStateChanged);
       _init();
     }
-  }
-
-  void _onCastStateChanged() {
-    if (!mounted) return;
-    final state = CastManager.instance.state;
-    if (!_casting && state.connected && !state.mediaLoaded) {
-      // A receiver was just chosen in the route picker — hand it the
-      // current video. The cast call flips mediaLoaded on success.
-      _onCastPressed();
-      return;
-    }
-    if (!_casting && state.connected && state.mediaLoaded) {
-      _casting = true;
-    }
-    if (_casting && !state.connected) {
-      _casting = false;
-    }
-    setState(() {});
   }
 
   void _onTmdbChanged() {
@@ -2466,58 +2443,6 @@ Future<void> _offerVc1Mpv() async {
     }
   }
 
-  Future<void> _onCastPressed() async {
-    if (_casting) {
-      await CastManager.instance.stop();
-      _casting = false;
-      if (mounted) setState(() {});
-      return;
-    }
-    final url = castableUrlFor(_current);
-    if (url == null) {
-      // Phone-only sources (local files, SMB, WebDAV with auth, …) are not
-      // fetched by a receiver on their own. The local media server that would
-      // bridge them is not wired yet, so there is nothing to cast.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This video can only be played on the phone.'),
-          ),
-        );
-      }
-      return;
-    }
-    final reach = castReachFor(_current);
-    if (reach == CastReach.needsLocalServer) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This video is not reachable from the TV.'),
-          ),
-        );
-      }
-      return;
-    }
-    final name = _tmdbMeta?.movie.title ?? _displayTitle;
-    try {
-      await CastManager.instance.cast(
-        url: url,
-        title: name,
-        positionMs: _position.inMilliseconds,
-        contentType: 'video/*',
-        imageUrl: _tmdbMeta?.movie.posterUrl(width: 500),
-      );
-      _casting = true;
-      if (mounted) setState(() {});
-    } on CastException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message)),
-        );
-      }
-    }
-  }
-
   void _openMpvPictureControls() {
     if (!_mpvReady || _inPip || _touchLocked) return;
     _showControls();
@@ -4373,7 +4298,6 @@ Future<void> _offerVc1Mpv() async {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    CastManager.instance.removeListener(_onCastStateChanged);
     TmdService.instance.removeListener(_onTmdbChanged);
     _hideTimer?.cancel();
     _sleepTicker?.cancel();
@@ -8101,10 +8025,6 @@ if (mounted) setState(_applySwipeValue);
                              if (AirPlayButton.isSupported) ...[
                                const AirPlayButton(),
                                const SizedBox(width: 4),
-                             ],
-                             if (CastButton.isSupported) ...[
-                               const SizedBox(width: 4),
-                               CastButton(),
                              ],
                              _TvControlButton(
                                  onPressed: _openVideoInfoSheet,
