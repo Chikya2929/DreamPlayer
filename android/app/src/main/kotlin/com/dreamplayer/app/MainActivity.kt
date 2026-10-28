@@ -13,6 +13,7 @@ import android.provider.OpenableColumns
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
@@ -21,6 +22,7 @@ class MainActivity : FlutterActivity() {
     private var systemChannel: MethodChannel? = null
     private var spatialMonitor: SpatialAudioMonitor? = null
     private var fileBrowser: FileBrowser? = null
+    private var castManager: CastManager? = null
 
     companion object {
         /// Robust TV-box detection (mirrors Just Player's `Utils.isTvBox()`):
@@ -87,6 +89,16 @@ class MainActivity : FlutterActivity() {
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "dreamplayer/mpv_player",
             MpvSurfaceViewFactory(this, flutterEngine.dartExecutor.binaryMessenger),
+        )
+        // Google Cast route picker button.
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "dreamplayer/cast_button",
+            CastButtonViewFactory(this, flutterEngine.dartExecutor.binaryMessenger),
+        )
+        castManager = CastManager(this)
+        castManager!!.configure(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CastManager.METHOD_CHANNEL),
+            EventChannel(flutterEngine.dartExecutor.binaryMessenger, CastManager.EVENT_CHANNEL),
         )
         fileBrowser = FileBrowser(this)
         fileBrowser!!.configure(

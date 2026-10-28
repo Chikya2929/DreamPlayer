@@ -181,4 +181,9 @@ dependencies {
     // WebDAV/SMB pattern: browsing + streaming DataSource (FtpDataSource).
     implementation("commons-net:commons-net:3.11.1")
     implementation("com.jcraft:jsch:0.1.55")
+    // Google Cast (step 4 of the GPU rendering + Cast plan): the framework
+    // gives us the route picker, the session and the RemoteMediaClient. The
+    // DEFAULT Media Receiver (CC1AD845) is used, so no Cast Console app has
+    // to be registered for a sideloaded build.
+    implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
 }
