@@ -491,6 +491,10 @@ class AppLocalizationsRu extends AppLocalizations {
       'Передавать HDR-цветовое пространство на дисплей';
 
   @override
+  String get settingsToneMapLinearDesc =>
+      'Поднять картинку в HDR-диапазон (без Dolby Vision)';
+
+  @override
   String get settingsMpvInterpolation => 'Интерполяция кадров (MPV)';
 
   @override

@@ -623,6 +623,10 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsToneMapLinearDesc": "将画面提升到 HDR 范围 (不支持杜比视界)",
+  "@settingsToneMapLinearDesc": {
+    "description": "Linear HDR mode subtitle"
+  },
   "settingsMpvInterpolation": "帧插值 (MPV)",
   "@settingsMpvInterpolation": {
     "description": "libmpv frame interpolation picker label"

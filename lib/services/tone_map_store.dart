@@ -9,17 +9,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// [native] — pass the source colorspace toward the display
 /// (`target-colorspace-hint`) so SurfaceFlinger/panel can handle HDR/DV.
 /// Needs a libplacebo/gpu-next build of libmpv and an HDR-capable surface.
+///
+/// [linear] — mpv-native Linear HDR: inverse tone mapping lifts the picture
+/// into the HDR range and the display renders it as HDR. No shaders, no
+/// custom libmpv beyond gpu-next; it is a boost, not a true Dolby Vision
+/// passthrough.
 enum ToneMapMode {
   sdr('sdr', 'SDR tone-map'),
-  native('native', 'Native HDR/DV');
+  native('native', 'Native HDR/DV'),
+  linear('linear', 'Linear HDR');
 
   const ToneMapMode(this.value, this.label);
 
   final String value;
   final String label;
 
+  /// Whether the engine hands an HDR signal to the display (so the panel
+  /// does the tone mapping) instead of tone-mapping in-engine.
+  bool get handsHdrToDisplay =>
+      this == ToneMapMode.native || this == ToneMapMode.linear;
+
   static ToneMapMode fromString(String? s) => switch (s) {
         'native' => ToneMapMode.native,
+        'linear' => ToneMapMode.linear,
         _ => ToneMapMode.sdr,
       };
 }

@@ -21,6 +21,7 @@ import '../services/media_probe.dart';
 import '../services/resume_progress_helper.dart';
 import '../services/resume_store.dart';
 import '../services/default_engine_store.dart';
+import '../services/tone_map_store.dart';
 import '../services/simkl_client.dart';
 import '../services/smb_client.dart';
 import '../services/app_debug_log.dart';
@@ -288,6 +289,7 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
   final Stopwatch _openWatch = Stopwatch();
   DefaultEngine _defaultEngine = DefaultEngine.ask;
   bool _defaultEngineLoaded = false;
+  ToneMapMode _toneMapMode = ToneMapMode.sdr;
   final ScrollController _scrollController = ScrollController();
   bool _heroCollapsed = false;
 
@@ -300,6 +302,7 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
     _load();
     _refreshWatched();
     _loadDefaultEngine();
+    _loadToneMapMode();
     if (widget.video != null) {
       _probing = true;
       _probeFile();
@@ -350,6 +353,15 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
     } catch (_) {
       if (mounted) _defaultEngineLoaded = true;
     }
+  }
+
+  /// The HDR presentation mode the MPV engine will use — it decides what the
+  /// "Play with MPV" caption may honestly claim.
+  Future<void> _loadToneMapMode() async {
+    try {
+      final mode = await ToneMapStore.load();
+      if (mounted) setState(() => _toneMapMode = mode);
+    } catch (_) {}
   }
 
   Future<void> _refreshPositions() async {
@@ -1644,9 +1656,14 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
         ],
       ),
       const SizedBox(height: 4),
-      const Text(
-        'SDR only — no Dolby Vision / HDR (Media3 handles those)',
-        style: TextStyle(fontSize: 11, color: Colors.white54),
+      Text(
+        switch (_toneMapMode) {
+          ToneMapMode.sdr => 'SDR only — no Dolby Vision / HDR (Media3 handles those)',
+          ToneMapMode.native =>
+            'Native HDR/DV passthrough — needs an HDR-capable display',
+          ToneMapMode.linear => 'Linear HDR — brighter, but not Dolby Vision',
+        },
+        style: const TextStyle(fontSize: 11, color: Colors.white54),
         textAlign: TextAlign.center,
       ),
     ];

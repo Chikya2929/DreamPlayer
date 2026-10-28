@@ -46,6 +46,7 @@ import '../utils/episode_label.dart';
 import '../utils/gesture_safety.dart';
 import '../utils/screen_orientation.dart';
 import '../utils/mpv_audio_select.dart';
+import '../utils/mpv_hdr_mode.dart';
 import '../utils/mpv_interpolation.dart';
 import '../utils/mpv_volume.dart';
 import '../utils/subtitle_text_style.dart';
@@ -1861,10 +1862,18 @@ Future<void> _offerVc1Mpv() async {
 
   /// Applies the user's HDR presentation mode ([ToneMapMode]) to a live mpv.
   ///
+  /// The property set is **complete**: every mode writes every property it
+  /// owns (see `mpvHdrProperties`), because mpv keeps the previous value of
+  /// anything it is not told about. Without that, switching from "SDR
+  /// tone-map" to "Native HDR/DV" left `target-prim=bt.709` and
+  /// `target-trc=bt.1886` in place, so the picture stayed tone-mapped and SDR
+  /// while the UI claimed a native passthrough.
+  ///
   /// SDR: `vo=gpu-next` + libplacebo spline/bt.709/bt.1886 (needs a custom
   /// libmpv with libplacebo — stock falls back to `gpu` + bt.2390 handled
   /// by the caller). Native: `target-colorspace-hint` so the surface can
-  /// pass PQ/BT.2020 toward the display (also requires gpu-next).
+  /// pass PQ/BT.2020 toward the display (also requires gpu-next). Linear:
+  /// mpv-native inverse tone mapping, no shaders.
   Future<void> _applyMpvToneMap(
     Player player, {
     bool ignoreAnime4k = false,
@@ -1887,19 +1896,19 @@ Future<void> _offerVc1Mpv() async {
       debugPrint('mpv: stock libmpv — vo=gpu, tone-map mode ignored until Phase 3');
       return;
     }
-    if (_toneMapMode == ToneMapMode.sdr) {
-      await platform.setProperty('vo', 'gpu-next');
-      await platform.setProperty('tone-mapping', 'spline');
-      await platform.setProperty('gamut-mapping-mode', 'perceptual');
-      await platform.setProperty('target-prim', 'bt.709');
-      await platform.setProperty('target-trc', 'bt.1886');
-      await platform.setProperty('target-colorspace-hint', 'no');
-      debugPrint('mpv: tone-map applied (SDR gpu-next/spline/bt.709/bt.1886)');
-    } else {
-      await platform.setProperty('vo', 'gpu-next');
-      await platform.setProperty('target-colorspace-hint', 'yes');
-      debugPrint('mpv: tone-map applied (native colorspace-hint)');
+    await platform.setProperty('vo', 'gpu-next');
+    final properties = mpvHdrProperties(_toneMapMode);
+    for (final entry in properties.entries) {
+      try {
+        await platform.setProperty(entry.key, entry.value);
+      } catch (e) {
+        debugPrint('mpv: ${entry.key}=${entry.value} unavailable: $e');
+      }
     }
+    debugPrint(
+      'mpv: HDR mode applied (${_toneMapMode.value}) '
+      '${properties.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
+    );
   }
 
   /// Applies the user's frame-interpolation choice to libmpv (issue #53).
@@ -6391,6 +6400,7 @@ if (mounted) setState(_applySwipeValue);
                                   switch (m) {
                                     ToneMapMode.sdr => AppLocalizations.of(context).settingsToneMapSdrDesc,
                                     ToneMapMode.native => AppLocalizations.of(context).settingsToneMapNativeDesc,
+                                    ToneMapMode.linear => AppLocalizations.of(context).settingsToneMapLinearDesc,
                                   },
                                   style: const TextStyle(color: Colors.white38, fontSize: 11),
                                 ),
@@ -7105,6 +7115,9 @@ if (mounted) setState(_applySwipeValue);
   ///
   /// - Native HDR/DV mode (+ gpu-next) → the detected source format
   ///   (Dolby Vision / HDR10 / …).
+  /// - Linear HDR mode → "Linear HDR": the output IS an HDR signal, but it is
+  ///   not the source's Dolby Vision / HDR10 signal, so it must not borrow
+  ///   the source's label.
   /// - SDR tone-map mode (+ gpu-next, HDR source) → "Tone-mapped SDR".
   /// - SDR source → plain "SDR".
   /// - Stock libmpv (no gpu-next) → "SDR" (no real HDR path; honest).
@@ -7112,6 +7125,7 @@ if (mounted) setState(_applySwipeValue);
     final hdr = _effectiveHdr;
     if (hdr == HdrFormat.sdr || _mpvGpuNext != true) return 'SDR';
     if (_toneMapMode == ToneMapMode.native) return _hdrLabel;
+    if (_toneMapMode == ToneMapMode.linear) return 'Linear HDR';
     return 'Tone-mapped SDR';
   }
 
@@ -7121,6 +7135,7 @@ if (mounted) setState(_applySwipeValue);
       return const Color(0xFF9E9E9E);
     }
     if (_toneMapMode == ToneMapMode.native) return _hdrColor;
+    if (_toneMapMode == ToneMapMode.linear) return const Color(0xFFFFB74D);
     return const Color(0xFF9E9E9E);
   }
 

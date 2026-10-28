@@ -1379,6 +1379,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     AppLocalizations.of(context).settingsToneMapSdrDesc,
                                   ToneMapMode.native =>
                                     AppLocalizations.of(context).settingsToneMapNativeDesc,
+                                  ToneMapMode.linear =>
+                                    AppLocalizations.of(context).settingsToneMapLinearDesc,
                                 };
                                 return RadioListTile<ToneMapMode>(
                                   value: m,

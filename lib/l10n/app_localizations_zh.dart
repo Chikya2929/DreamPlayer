@@ -488,6 +488,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsToneMapNativeDesc => '将 HDR 色彩空间直通到显示器';
 
   @override
+  String get settingsToneMapLinearDesc => '将画面提升到 HDR 范围 (不支持杜比视界)';
+
+  @override
   String get settingsMpvInterpolation => '帧插值 (MPV)';
 
   @override

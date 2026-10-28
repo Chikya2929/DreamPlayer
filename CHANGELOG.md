@@ -7,6 +7,11 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **Linear HDR for the MPV engine.** Settings → Player → "HDR tone-map (MPV)"
+  now has a third option next to "SDR tone-map" and "Native HDR/DV": it lifts
+  the picture into the HDR range and lets the display render it as HDR, with
+  no shaders and no custom build. It is a boost, not Dolby Vision — the
+  player keeps saying so.
 - **List or Grid view in the network browsers.** The three-dot menu at the top
   right of the SMB, WebDAV, FTP, DLNA and Jellyfin browsers now has a **View**
   entry: **List** for the familiar rows, **Grid** for tiles with artwork —
@@ -42,6 +47,12 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Fixed
 
+- **"Native HDR/DV" did not actually hand HDR to the display.** The MPV
+  engine's HDR mode only set the properties it needed, so switching from
+  "SDR tone-map" to "Native HDR/DV" left the old BT.709 / BT.1886 output
+  behind — the picture stayed tone-mapped to SDR while the menu claimed a
+  passthrough. Every mode now writes the complete set of colour properties it
+  owns, so a switch always starts from a known state.
 - **MPV no longer stalls on files on a network share.** Playing a file from
   an SMB share with the MPV engine spent its time in "buffering", and on some
   servers it stopped after the first request. Two things were wrong: the

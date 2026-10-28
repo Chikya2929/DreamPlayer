@@ -1026,6 +1026,12 @@ abstract class AppLocalizations {
   /// **'Pass HDR colorspace through to the display'**
   String get settingsToneMapNativeDesc;
 
+  /// Linear HDR mode subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Lift the picture into HDR range (no Dolby Vision)'**
+  String get settingsToneMapLinearDesc;
+
   /// libmpv frame interpolation picker label
   ///
   /// In en, this message translates to:

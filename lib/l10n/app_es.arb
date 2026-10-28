@@ -623,6 +623,10 @@
   "@settingsToneMapNativeDesc": {
     "description": "Native HDR mode subtitle"
   },
+  "settingsToneMapLinearDesc": "Elevar la imagen al rango HDR (sin Dolby Vision)",
+  "@settingsToneMapLinearDesc": {
+    "description": "Linear HDR mode subtitle"
+  },
   "settingsMpvInterpolation": "Interpolación de fotogramas (MPV)",
   "@settingsMpvInterpolation": {
     "description": "libmpv frame interpolation picker label"

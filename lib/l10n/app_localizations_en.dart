@@ -489,6 +489,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Pass HDR colorspace through to the display';
 
   @override
+  String get settingsToneMapLinearDesc =>
+      'Lift the picture into HDR range (no Dolby Vision)';
+
+  @override
   String get settingsMpvInterpolation => 'Frame interpolation (MPV)';
 
   @override
