@@ -879,6 +879,110 @@ evidence lines (`mpv: interpolation = …`, `video-sync = …`, `tscale = …`,
 `display-fps = …`, `estimated-display-fps = …`) are printed after every change
 so the next "did it do anything?" is answered from the log.
 
+### Mpv∞ (`ZHINFINITY/Mpv-infinity`) — GPU rendering, TV and Cast research (2026-10-28) — read this before borrowing anything
+
+**What it is**: a native **Kotlin/Compose** Android player (1 952 commits, 156 stars),
+not a Flutter app. Source-available, **not** open source. Cloned to
+`~/.cache/opencode/Mpv-infinity` for the study below. Its README is a marketing
+document; the interesting parts are in `app/src/main/cpp/` and
+`app/src/main/java/app/infinity/mpvz/`.
+
+**THE LICENCE IS THE FIRST GATE — nothing of theirs may be copied.** Every owned
+file carries `SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0`
+(`app/src/main/cpp/mpvflow/mpvflow_gpu.c`, `ui/player/ThermalMonitor.kt`,
+`ui/cast/*`, …), and the repo root is now **"Mpv∞ Permission-Only Terms 1.0"**
+(app use allowed, code reuse needs written permission). Older snapshots are
+AGPL-3.0-or-later; `LICENSE-BOUNDARY.md` is explicit that the PolyForm grant
+"remains available" only for the covered snapshots. Third-party material keeps
+its own licence and IS usable: **Anime4K shaders are MIT (bloc97)**; mpv is
+LGPL/GPL; libplacebo is MIT; hdr-toys carries **no notice in their tree** —
+check the upstream repo before shipping any of it.
+
+**Their MPV GPU path is a PATCHED libmpv, not a plugin.** This is the fact that
+decides what is possible:
+
+- `app/src/main/cpp/mpvflow/mpvflow-vo-gpu-next.patch` (86 KB) rewrites
+  `video/out/vo_gpu_next.c` so the VO exposes source-frame textures and
+  display-timed output ticks; `mpvflow-aimagereader-vulkan.patch` adds the
+  Android ImageReader Vulkan path; `vf_mpvflow.c` is a second route (an mpv
+  **user filter**, compiled into mpv).
+- `scripts/build-mpvflow-mpv-runtime.sh` builds a pinned mpv through
+  mpv-android's buildscripts and applies the patch — **the same pipeline we
+  already use** for our custom arm64 libmpv, so the *mechanics* are familiar.
+- The synthesis is real MEMC: 8×8 parent / 4×4 fine blocks (stride 4),
+  coarse-to-fine SAD + uniqueness, forward/backward cycle consistency, Newton
+  inverse-warp with bounded iterations, confidence fades, scene-cut crossfade —
+  all as **libplacebo compute passes on Vulkan** (plus an experimental Qualcomm
+  OpenCL path via `cl_qcom_android_ahardwarebuffer_host_ptr`). No CPU readback.
+  Options: `target-fps`, `block-size`, `search-radius`, `max-dimension`.
+- `docs/mpvflow-design.md` records ~10 rounds of artifact repairs (half-pixel
+  parent registration, the aperture problem, fixed-point inverse-warp
+  non-convergence). **That log is the cost curve of this project** — it is not a
+  weekend feature, and it is not ours to reuse.
+
+**The Vulkan trap to write down before anyone switches renderer.** With
+`gpu-api=vulkan` + `vo=gpu-next`, a MediaCodec decoder cannot render straight
+into the VO, so their `RendererBackendPolicy.preferredHwdecMode` falls back to
+`hwdec=mediacodec-copy` (CPU copy). We run `hwdec=auto-safe` → direct
+`mediacodec` on the GL path. **Moving to Vulkan costs us the zero-copy decode
+path** until a Vulkan ImageReader path exists (theirs is part of the blocked
+patch set).
+
+**What we CAN adopt — ideas plus public APIs, none of their code:**
+
+| Idea | Mechanism | Cost |
+|---|---|---|
+| **Anime4K** (our open backlog item) | MIT `.glsl` shaders → mpv's **`glsl-shaders`** property. They toggle it live with `change-list glsl-shaders append`; we have `NativePlayer.setProperty`. | cheap |
+| **hdr-toys tone/gamut mapping** | Same property; a profile = an ordered shader chain. | cheap |
+| **Linear-HDR / SDR→HDR boost** | Option-only, no shader: `target-colorspace-hint=yes`, `inverse-tone-mapping=yes`, `hdr-compute-peak=yes`, `hdr-reference-white=203`. | cheap |
+| **Their HDR state policy** (the real value) | When the GLSL chain owns transfer/gamut/tone → `target-colorspace-hint=no` + fixed `target-prim`/`target-trc`; when mpv owns it → `yes` + resets. **Always write the COMPLETE property set**, so a mode switch can never leave stale primaries/TRC behind. | cheap, and it prevents a whole bug class |
+| **Thermal-aware quality** | `PowerManager.getThermalHeadroom(10)` (API 30+), sample every 10 s → auto-downgrade shader/interpolation quality. Public Android API; our own ~30-line class. | cheap |
+| **Named filter presets** | Just mpv property bundles (brightness/saturation/contrast/gamma/hue/sharpen) — **we already ship this** as the MPV picture panel; they only named them. | trivial |
+| **Renderer backend choice** | `gpu-api`/`gpu-context` must be set **before `vo`**, and changing them needs a **core recreation** — with media_kit that means recreating the `Player`, which our `_init` does once. | moderate |
+
+**Real interpolation WITHOUT touching mpv source — the experiment worth running.**
+Their MEMC is unavailable to us, but FFmpeg's `minterpolate` is licence-clean and
+mpv bundles FFmpeg: `vf=lavfi=[in]minterpolate=fps=60:mc_mode=aobmc:me_mode=bidir:vsbmc=1`
+plus the `video-sync=display-resample` recipe we already own. Verify on device:
+(1) does our libmpv ship `vf_lavfi`, (2) does `minterpolate` see frame pairs
+through mpv's single-input graph, (3) what does it cost at 1080p and 4K. Stock
+blending stays the fallback until this proves out.
+
+**Android TV: they have NONE.** No `LEANBACK_LAUNCHER`, no
+`android.software.leanback`, no banner, no `UiModeManager` check, no TV UI, no
+TV-specific layout. Their D-pad handling is `PlayerActivity.onKeyDown`
+(`:8289-8330`): left/right → double-tap seek zones, space → play/pause, volume
+keys, Compose focus for the rest. **We are ahead** (leanback launcher, banner,
+`isTvMode()`, the blue focus-glow system, Fire TV verified with DV + audio
+passthrough). Only two things worth stealing: **configurable left/centre/right
+double-tap zones** and **multi-tap continuous seeking** (triple/quadruple tap
+keeps seeking).
+
+**Google Cast: one path for both engines — and thinner than the README
+suggests.** Nine files in `ui/cast/`, ~1 500 lines, all PolyForm (reimplement,
+never copy).
+
+- `PlayerActivity.currentCastMediaSnapshot()` (`:2726`) builds **one**
+  `CastMediaSnapshot`: native → `MediaItem.localConfiguration.uri`; MPV → mpv's
+  `path` property (a bare path is mapped to `file://`). Both then go through the
+  identical `resolveContentUrl()` → `RemoteMediaClient.load()`.
+- **Only `http`/`https` (non-loopback), `content` and `file` are castable.**
+  Their own SMB/FTP/WebDAV resolve to `null` → *"This media source cannot be
+  reached by the Cast device"*. They explicitly reject `127.0.0.1`/`localhost`,
+  i.e. their own loopback proxy is excluded too.
+- Local files are exposed by their own NanoHTTPD server on `0.0.0.0:0` with a
+  token path, `Range` support and CORS headers (`CastMediaServer.kt`).
+- The **receiver decodes**, so mpv-only formats do not cast ("not transcoded
+  automatically" — their own README).
+- Tracks are handed over as `MediaTrack`s with active IDs; local playback is
+  paused and **restored at the receiver's last position** when the session ends.
+- **OUR differentiator**: `SmbHttpProxy` is already a Range-capable HTTP bridge
+  over the SMB ring buffer, but it binds to **127.0.0.1** (`SmbHttpProxy.kt:80`).
+  Binding it to `0.0.0.0` and handing the phone's LAN URL to the receiver makes
+  **SMB / WebDAV / FTP castable** — which their app cannot do. Cost:
+  `play-services-cast-framework`, a `MediaRouteButton`, snapshot/pause/restore
+  plumbing, and the LAN exposure (which is a real decision, not just code).
+
 ### Settings → Metadata: one decision, not three rows
 
 The provider selector sits **at the top** and is drawn as **one outlined box
@@ -2294,10 +2398,91 @@ AirPlay video needs an `AVPlayerLayer`. The picker is still shown for both — a
 audio-only route to a speaker is a valid use — and the release notes say so
 plainly rather than implying the picture moves.
 
+### GPU rendering + Cast — the ordered plan (2026-10-28)
+
+Derived from the Mpv∞ study above. **MPV-only for every rendering item** —
+Media3 stays the Dolby Vision / HDR engine and is never routed through a custom
+renderer (that trade is already documented as rejected). **No Mpv∞ code is
+copied**; the only files we ship from that ecosystem are the MIT Anime4K
+shaders (and, after a licence check, hdr-toys).
+
+Each step is gated on the previous one being verified **on the phone**
+(`a019b7f3`), never on the emulator.
+
+**Step 1 — Anime4K on the MPV engine (MPV-only, SDR-only).**
+Ship the MIT Anime4K `.glsl` files as assets, copy them to a real directory on
+first use (mpv needs file paths, not asset paths), and drive them through the
+`glsl-shaders` property. Reuse the existing picture-panel plumbing: the ⋮ sheet
+already talks to mpv properties, and `NativePlayer.setProperty` /
+`change-list` are already in use for `sub-font` and the tone-map mode.
+Gates: (a) confirm our arm64 libplacebo build renders the chain into our
+`MpvSurfaceView` (the chain runs inside mpv's renderer, so `--wid` is
+irrelevant); (b) 1080p anime → 4K without dropped frames at 60 fps;
+(c) **auto-disable at 4K/8K source** and for HDR/DV content (the shader chain
+destroys the native HDR layer — the chip must say SDR); (d) the toggle must be
+**session-only or explicit**, never auto-enabled.
+
+**Step 2 — MPV HDR mode matrix (OFF / hdr-toys PQ / HLG / BT.2020 / Linear).**
+Replace the single "SDR tone-map" mode with the full matrix, and adopt their
+state policy: the GLSL pipeline owns transfer/gamut/tone → `target-colorspace-hint=no`
++ fixed `target-prim`/`target-trc`; mpv-native → `target-colorspace-hint=yes`
+(+ `inverse-tone-mapping=yes`, `hdr-compute-peak=yes`, `hdr-reference-white=203`
+for SDR→HDR boost). **Write the COMPLETE property set on every switch** — that
+is the rule that stops a mode change leaving stale primaries/TRC behind. The
+existing tone-map mode (`spline` / `perceptual` / `bt.709` / `bt.1886`) stays as
+the OFF-path fallback, and the "SDR only — no Dolby Vision / HDR" honesty in the
+info sheet must keep matching whatever mode is active.
+
+**Step 3 — Thermal-aware quality (Android API, no new dependency).**
+`PowerManager.getThermalHeadroom(10)` (API 30+), sampled every 10 s while
+playing, driving the Anime4K tier and the interpolation target. Below 0.40
+headroom → cheapest tier; below 0.60 → one step down; below 0.80 → cap. This is
+the one piece of their design we can implement exactly, because the Android API
+is public and the policy is ours to write.
+
+**Step 4 — Google Cast on Android.**
+`play-services-cast-framework` + a `MediaRouteButton` in the player chrome.
+Model it on their **engine-agnostic snapshot** (one snapshot object for both
+Media3 and MPV → one `resolveContentUrl` → one `RemoteMediaClient.load`), but
+implement it ourselves. Two decisions we must make explicitly:
+(a) **what is castable** — local `content://`/`file://` + `http(s)` URLs; and
+(b) **whether network sources are exposed over the LAN**. The second is our
+differentiator: rebinding `SmbHttpProxy` from `127.0.0.1` to `0.0.0.0` and
+handing the phone's LAN URL to the receiver makes SMB/WebDAV/FTP castable,
+which Mpv∞ cannot do (they reject every loopback source). LAN exposure is a
+security decision, so it ships behind a setting, off by default. The receiver
+decodes, so mpv-only formats will not cast — the UI must say so instead of
+failing silently. Local playback pauses on cast and is **restored at the
+receiver's last position** when the session ends.
+
+**Step 5 — Real (motion-compensated) interpolation without patching mpv.**
+Spike: FFmpeg `minterpolate` through mpv's `vf=lavfi`
+(`[in]minterpolate=fps=60:mc_mode=aobmc:me_mode=bidir:vsbmc=1`) plus the
+`video-sync=display-resample` recipe we already own. Three questions to answer
+on device: does our libmpv ship `vf_lavfi`; does `minterpolate` see frame pairs
+through mpv's single-input graph; and what does it cost at 1080p/4K. Stock
+blending stays the shipped fallback until this proves out — the current
+`--interpolation` recipe is verified working and must not regress.
+
+**Step 6 — Our own patched mpv with a GPU MEMC filter (only if step 5 fails).**
+This is the Mpv∞ architecture without their code: patch `vo_gpu_next` (or write
+an mpv user filter) in OUR libmpv build, and implement the motion estimation
+ourselves. Their `docs/mpvflow-design.md` shows the real cost — ~10 rounds of
+artifact repair (half-pixel parent registration, the aperture problem,
+inverse-warp convergence) before it looked acceptable. **Do not start this
+step while 1-5 are unfinished**, and do not read their design doc as a
+specification to implement; it is a record of one team's failures.
+
+**Two things from the study we will NOT adopt:** Media3-side interpolation (it
+costs the Dolby Vision / HDR passthrough that is the whole point of the native
+engine), and any move to `gpu-api=vulkan` on the MPV engine — it forces
+`hwdec=mediacodec-copy` and gives up the zero-copy MediaCodec path until a
+Vulkan ImageReader path exists.
+
 ### Player feature backlog (prioritized 2026-09)
 
 1. Android release signing (deferred — see CI/Deployment).
-2. **Anime4K real-time upscaling (future, low priority)**: [Anime4K](https://github.com/bloc97/anime4k) is a set of open-source GLSL shaders that upscale native 1080p anime → 4K in real-time, designed for mpv's GPU rendering pipeline. **Not implementable today** because (a) Android uses ExoPlayer/Media3 (no GLSL shader injection — video writes directly to a `Surface` backed by `SurfaceFlinger`), (b) the libmpv engine's video path is a platform `SurfaceView` owned by the app (not a raw mpv `--vo=gpu` window we can inject into — Anime4K's shader chain can't run), and (c) it conflicts with HDR/DV passthrough (the panel receives BT.2020 PQ data; running a shader on tone-mapped SDR frames defeats the pipeline). **If the mpv fallback engine is ever promoted to a "GPU filters" path** (mpv `--vf=glslshader=…` with a raw rendering window), Anime4K shaders could be offered as an opt-in toggle for SDR anime content only — DV/HDR10 files must stay on Media3 + native `SurfaceView`. The upstream repo ([bloc97/Anime4K](https://github.com/bloc97/Anime4K)) has 21k stars and active maintenance; [Anime4KMetal](https://github.com/imxieyi/Anime4KMetal) exists for Apple platforms (Metal shaders) which could apply to the iOS AetherEngine path in a distant future. Keep this in the backlog; revisit only if user demand surfaces.
+2. **Anime4K real-time upscaling (MOVED TO THE PLAN BELOW, 2026-10-28)**: [Anime4K](https://github.com/bloc97/anime4k) is a set of MIT-licensed GLSL shaders that upscale native 1080p anime → 4K in real-time, designed for mpv's GPU rendering pipeline. The old blocker ("not implementable today") was the belief that a shader chain needs a raw mpv `--vo=gpu` window we do not own. **That is wrong**: `glsl-shaders` is a chain *inside* mpv's renderer, so it runs into whatever surface mpv renders to — our `MpvSurfaceView` SurfaceView included, and our custom arm64 libmpv already ships libplacebo + `gpu-next`. What remains true: it is **MPV-only** (Media3 has no shader injection — video writes straight to a `Surface`), and it must be **SDR-only**, because a shader chain means the frame is no longer the decoder's native BT.2020 PQ layer, so real HDR/DV passthrough is lost. The upstream repo ([bloc97/Anime4K](https://github.com/bloc97/Anime4K)) has 21k stars and active maintenance; [Anime4KMetal](https://github.com/imxieyi/Anime4KMetal) exists for Apple platforms (Metal shaders) which could apply to the iOS AetherEngine path in a distant future. See "GPU rendering + Cast — the ordered plan" for the implementation order and the gates.
 3. **Download to device (done, 2026-09)**: download video files from network sources (SMB, WebDAV, HTTP, Jellyfin, UPnP) to local storage for offline playback. Modeled on Nova Video Player's `CopyCutEngine` + `FileManagerService` pattern. Core is built: Kotlin foreground service + Dart DownloadManager + UI triggers + download screen + SMB via loopback + silent notification with Cancel button + iOS local notification. iOS: notification shows banner once at start, then silent progress updates every 5s; cancel action forwards `jobId` to Dart; tap notification body opens the Downloads drawer. Local file copy uses async chunked I/O (256 KB) with event-loop yield each chunk — sync I/O blocked the UI and caused stutter. Cancel properly interrupts the copy loop via `_activeCompleter` and deletes the partial file. Progress bar renders for all downloads (indeterminate animation when `totalBytes` is unknown; HEAD probe runs before the GET on HTTP sources to resolve size). FTP download is hidden because Dart `HttpClient` cannot handle `ftp://` URIs.
  4. **Localization / internationalization (DONE 2026-09)**: full app translation via Flutter's built-in `flutter_localizations` + `intl` package. Languages: **English** (default/fallback), **Spanish** (es), **Chinese Simplified** (zh), **Russian** (ru). Auto-detects device system language on launch; optional Settings → General → Language override. Technical terms (codec names, HDR, Dolby Vision, etc.) stay English. **504 ARB keys** in English ARB (`lib/l10n/app_en.arb`), all translated to es/zh/ru (~130 key strings per language). Auto-generated `AppLocalizations` class via `gen-l10n` with camelCase getters, `l10n.yaml` at project root. `LanguageService` (`lib/services/language_service.dart`) manages the locale override with SharedPreferences persistence. `MaterialApp` wired with `localizationsDelegates` + `supportedLocales` via `ListenableBuilder` + **`ValueKey`** to force full rebuild on locale change. Language picker uses `StatefulBuilder` + `ListTile` + `onTap` (not `RadioGroup` — nullable `Locale?` generic type issues). **283 strings localized** across 13 screen files. `test/test_helper.dart` provides `localizationDelegates` for widget tests.
 
