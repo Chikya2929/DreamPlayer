@@ -932,7 +932,7 @@ patch set).
 
 | Idea | Mechanism | Cost |
 |---|---|---|
-| **Anime4K** (our open backlog item) | MIT `.glsl` shaders → mpv's **`glsl-shaders`** property. They toggle it live with `change-list glsl-shaders append`; we have `NativePlayer.setProperty`. | cheap |
+| **Anime4K** (**already shipped** — `bb38f09`, see step 1) | MIT `.glsl` shaders → mpv's **`glsl-shaders`** property. They toggle it live with `change-list glsl-shaders append`; we use `change-list … set` + a read-back. | cheap (done) |
 | **hdr-toys tone/gamut mapping** | Same property; a profile = an ordered shader chain. | cheap |
 | **Linear-HDR / SDR→HDR boost** | Option-only, no shader: `target-colorspace-hint=yes`, `inverse-tone-mapping=yes`, `hdr-compute-peak=yes`, `hdr-reference-white=203`. | cheap |
 | **Their HDR state policy** (the real value) | When the GLSL chain owns transfer/gamut/tone → `target-colorspace-hint=no` + fixed `target-prim`/`target-trc`; when mpv owns it → `yes` + resets. **Always write the COMPLETE property set**, so a mode switch can never leave stale primaries/TRC behind. | cheap, and it prevents a whole bug class |
@@ -2409,18 +2409,39 @@ shaders (and, after a licence check, hdr-toys).
 Each step is gated on the previous one being verified **on the phone**
 (`a019b7f3`), never on the emulator.
 
-**Step 1 — Anime4K on the MPV engine (MPV-only, SDR-only).**
-Ship the MIT Anime4K `.glsl` files as assets, copy them to a real directory on
-first use (mpv needs file paths, not asset paths), and drive them through the
-`glsl-shaders` property. Reuse the existing picture-panel plumbing: the ⋮ sheet
-already talks to mpv properties, and `NativePlayer.setProperty` /
-`change-list` are already in use for `sub-font` and the tone-map mode.
-Gates: (a) confirm our arm64 libplacebo build renders the chain into our
-`MpvSurfaceView` (the chain runs inside mpv's renderer, so `--wid` is
-irrelevant); (b) 1080p anime → 4K without dropped frames at 60 fps;
-(c) **auto-disable at 4K/8K source** and for HDR/DV content (the shader chain
-destroys the native HDR layer — the chip must say SDR); (d) the toggle must be
-**session-only or explicit**, never auto-enabled.
+**Step 1 — Anime4K: SHIPPED, one gap left (thermal tiering).**
+Anime4K is **already in the app** (commit `bb38f09`): the MIT shaders are in
+`assets/anime4k/`, `lib/services/anime4k_shader_store.dart` copies them out and
+maps the six modes (A / B / C / A+A / B+B / C+A) to a shader chain, and
+`player_screen.dart` applies it **on the MPV engine only**, **session-only**,
+from the player's ⋮ sheet. It is **SDR-only** on purpose
+(`isAnime4kSdrVideo` refuses DV/PQ/HLG/BT.2020), and it runs on `vo=gpu` +
+`gpu-api=opengl` with `hwdec=mediacodec-copy` — the legacy GLSL path cannot
+take a direct MediaCodec surface.
+
+**The 4K/8K guard is DONE (2026-10-28).** `isAnime4kSupportedResolution`
+(`anime4k_shader_store.dart`) refuses a source above **2560×1440 ≈ 3.7 MP**,
+judged on the **pixel count, not on each dimension** — a vertical 1080×2160 clip
+has the same pixel count as 1920×1080 and is fine, while 3840×2160 is not. The
+size comes from mpv's `VideoParams.w`/`h` (`_mpvVideoParams`), so the guard is
+a comparison, not a new probe. An unknown size is allowed (it means "not
+measured yet"). The chain is applied with `change-list glsl-shaders set` and then
+**read back** (`getProperty('glsl-shaders')`) — keep that read-back, it is what
+turns a silent no-op into a visible error.
+
+**Log the DECISION, not just the result.** `_onMpvVideoParams` prints
+`mpv: Anime4K eligible|blocked (<reason>) <w>x<h>`. Without it, "Anime4K did
+nothing" is indistinguishable from "the shader list was rejected" — and the
+first `video-params` event arrives with `nullxnull` before the real size, so a
+log line alone is not proof either; the **second** line carries the real size.
+
+**Verified on-device (OnePlus CPH2573, 2026-10-28):** the 4K Avengers file
+reports `mpv: Anime4K blocked (SDR video only) 3840x2160` and the chain does
+not come up; the HDR reason wins over the size reason, which is the right
+priority (a shader chain would destroy the native PQ layer anyway). The user
+confirmed Anime4K still works on 1080p via the MPV engine.
+
+**The one gap left is (b) thermal tiering**, which is step 3.
 
 **Step 2 — MPV HDR mode matrix (OFF / hdr-toys PQ / HLG / BT.2020 / Linear).**
 Replace the single "SDR tone-map" mode with the full matrix, and adopt their
@@ -2482,7 +2503,7 @@ Vulkan ImageReader path exists.
 ### Player feature backlog (prioritized 2026-09)
 
 1. Android release signing (deferred — see CI/Deployment).
-2. **Anime4K real-time upscaling (MOVED TO THE PLAN BELOW, 2026-10-28)**: [Anime4K](https://github.com/bloc97/anime4k) is a set of MIT-licensed GLSL shaders that upscale native 1080p anime → 4K in real-time, designed for mpv's GPU rendering pipeline. The old blocker ("not implementable today") was the belief that a shader chain needs a raw mpv `--vo=gpu` window we do not own. **That is wrong**: `glsl-shaders` is a chain *inside* mpv's renderer, so it runs into whatever surface mpv renders to — our `MpvSurfaceView` SurfaceView included, and our custom arm64 libmpv already ships libplacebo + `gpu-next`. What remains true: it is **MPV-only** (Media3 has no shader injection — video writes straight to a `Surface`), and it must be **SDR-only**, because a shader chain means the frame is no longer the decoder's native BT.2020 PQ layer, so real HDR/DV passthrough is lost. The upstream repo ([bloc97/Anime4K](https://github.com/bloc97/Anime4K)) has 21k stars and active maintenance; [Anime4KMetal](https://github.com/imxieyi/Anime4KMetal) exists for Apple platforms (Metal shaders) which could apply to the iOS AetherEngine path in a distant future. See "GPU rendering + Cast — the ordered plan" for the implementation order and the gates.
+2. **Anime4K real-time upscaling (SHIPPED 2026-09, commit `bb38f09` — one gap left)**: [Anime4K](https://github.com/bloc97/anime4k) is a set of MIT-licensed GLSL shaders that upscale native 1080p anime → 4K in real-time. It is **already in the app**: the MIT shaders live in `assets/anime4k/` (with their LICENSE), `lib/services/anime4k_shader_store.dart` copies them to the app-support dir on first use (mpv needs real file paths) and maps the six canonical modes (A / B / C / A+A / B+B / C+A) to a shader chain, and `player_screen.dart` applies it **on the MPV engine only**, **session-only** (no pref), from the player's ⋮ sheet. Two things are deliberately NOT done: it is **SDR-only** (`isAnime4kSdrVideo` refuses DV/PQ/HLG/BT.2020 content — a shader chain means the frame is no longer the decoder's native BT.2020 PQ layer, so real HDR passthrough would be lost), and the chain runs on `vo=gpu` + `gpu-api=opengl` with `hwdec=mediacodec-copy` (the legacy GLSL path cannot take a direct MediaCodec surface). **The 4K/8K auto-disable is done** (`isAnime4kSupportedResolution`, ≤ 2560×1440 by pixel count). The **remaining gap** is the thermal tiering — see "GPU rendering + Cast — the ordered plan", step 1. The upstream repo has 21k stars and active maintenance; [Anime4KMetal](https://github.com/imxieyi/Anime4KMetal) exists for Apple platforms (Metal shaders) which could apply to the iOS AetherEngine path in a distant future.
 3. **Download to device (done, 2026-09)**: download video files from network sources (SMB, WebDAV, HTTP, Jellyfin, UPnP) to local storage for offline playback. Modeled on Nova Video Player's `CopyCutEngine` + `FileManagerService` pattern. Core is built: Kotlin foreground service + Dart DownloadManager + UI triggers + download screen + SMB via loopback + silent notification with Cancel button + iOS local notification. iOS: notification shows banner once at start, then silent progress updates every 5s; cancel action forwards `jobId` to Dart; tap notification body opens the Downloads drawer. Local file copy uses async chunked I/O (256 KB) with event-loop yield each chunk — sync I/O blocked the UI and caused stutter. Cancel properly interrupts the copy loop via `_activeCompleter` and deletes the partial file. Progress bar renders for all downloads (indeterminate animation when `totalBytes` is unknown; HEAD probe runs before the GET on HTTP sources to resolve size). FTP download is hidden because Dart `HttpClient` cannot handle `ftp://` URIs.
  4. **Localization / internationalization (DONE 2026-09)**: full app translation via Flutter's built-in `flutter_localizations` + `intl` package. Languages: **English** (default/fallback), **Spanish** (es), **Chinese Simplified** (zh), **Russian** (ru). Auto-detects device system language on launch; optional Settings → General → Language override. Technical terms (codec names, HDR, Dolby Vision, etc.) stay English. **504 ARB keys** in English ARB (`lib/l10n/app_en.arb`), all translated to es/zh/ru (~130 key strings per language). Auto-generated `AppLocalizations` class via `gen-l10n` with camelCase getters, `l10n.yaml` at project root. `LanguageService` (`lib/services/language_service.dart`) manages the locale override with SharedPreferences persistence. `MaterialApp` wired with `localizationsDelegates` + `supportedLocales` via `ListenableBuilder` + **`ValueKey`** to force full rebuild on locale change. Language picker uses `StatefulBuilder` + `ListTile` + `onTap` (not `RadioGroup` — nullable `Locale?` generic type issues). **283 strings localized** across 13 screen files. `test/test_helper.dart` provides `localizationDelegates` for widget tests.
 

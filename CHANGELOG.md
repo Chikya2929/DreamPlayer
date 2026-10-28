@@ -81,6 +81,11 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   retried with the hyphen. The HTML entities AVDb leaves in its text fields
   are decoded too, so an original title is no longer shown with raw entities
   in it.
+- **Anime4K now stays off on 4K and 8K videos.** The upscaler only makes sense
+  on a 1080p source: on a 4K file there is nothing to upscale, and running the
+  shader chain over every 4K frame is a reliable way to drop frames and heat
+  up the phone. The MPV engine now refuses it above 1440p and tells you why,
+  instead of silently doing nothing.
 
 ## 0.5.4
 

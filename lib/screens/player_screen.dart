@@ -2005,11 +2005,28 @@ Future<void> _offerVc1Mpv() async {
     if (!Platform.isAndroid || !_mpvReady || _inPip) return false;
     final params = _mpvVideoParams;
     if (params == null || _effectiveHdr != HdrFormat.sdr) return false;
+    if (!isAnime4kSupportedResolution(width: params.w, height: params.h)) {
+      return false;
+    }
     return isAnime4kSdrVideo(
       colorMatrix: params.colormatrix,
       gamma: params.gamma,
       sigPeak: params.sigPeak,
     );
+  }
+
+  /// Why Anime4K cannot run on the current video (empty = it can).
+  String get _mpvAnime4kBlockReason {
+    final params = _mpvVideoParams;
+    if (params == null) return '';
+    if (_effectiveHdr != HdrFormat.sdr ||
+        _mpvParamsAreHdr(params)) {
+      return 'SDR video only';
+    }
+    if (!isAnime4kSupportedResolution(width: params.w, height: params.h)) {
+      return '4K/8K source — too heavy for a shader chain';
+    }
+    return '';
   }
 
   String get _mpvAnime4kStatus {
@@ -2019,7 +2036,8 @@ Future<void> _offerVc1Mpv() async {
       return '${_mpvAnime4kMode.label} · ${_mpvAnime4kMode.description}';
     }
     if (_mpvVideoParams == null) return 'Waiting for video info';
-    if (!_mpvAnime4kEligible) return 'SDR video only';
+    final blocked = _mpvAnime4kBlockReason;
+    if (blocked.isNotEmpty) return blocked;
     return 'Enable to choose a preset';
   }
 
@@ -2056,7 +2074,9 @@ Future<void> _offerVc1Mpv() async {
         setState(() {
           _mpvAnime4kError = _mpvVideoParams == null
               ? 'Waiting for video info'
-              : 'Available for SDR video only';
+              : (_mpvAnime4kBlockReason.isNotEmpty
+                    ? _mpvAnime4kBlockReason
+                    : 'Available for SDR video only');
         });
       }
       return;
@@ -2202,7 +2222,14 @@ Future<void> _offerVc1Mpv() async {
     setState(() {
       _mpvVideoParams = params;
     });
-    if (_mpvParamsAreHdr(params)) {
+    // Log the Anime4K decision, not just its result: "Anime4K did nothing" is
+    // otherwise indistinguishable from "the shader list was rejected".
+    debugPrint(
+      'mpv: Anime4K ${_mpvAnime4kEligible ? 'eligible' : 'blocked'} '
+      '($_mpvAnime4kBlockReason) ${params.w}x${params.h}',
+    );
+    if (_mpvParamsAreHdr(params) ||
+        !isAnime4kSupportedResolution(width: params.w, height: params.h)) {
       if (_mpvAnime4kEnabled) unawaited(_setMpvAnime4kEnabled(false));
       return;
     }
