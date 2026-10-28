@@ -64,8 +64,9 @@ import '../utils/tv_helper.dart';
 import '../utils/thermal_policy.dart';
 import '../services/thermal_monitor.dart';
 import '../services/cast_manager.dart';
+import '../services/cast_coordinator.dart';
 import '../widgets/airplay_button.dart';
-import '../widgets/cast_button.dart';
+import '../widgets/send_to_tv_sheet.dart';
 import '../widgets/format_chip.dart';
 import '../widgets/gesture_warning_pill.dart';
 import 'player_error.dart';
@@ -557,6 +558,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     // picker). The button itself lives in the top bar (CastButton).
     CastManager.instance.ensureListening();
     CastManager.instance.addListener(_onCastSessionChanged);
+    // Send-to-TV coordinator (Google Cast + DLNA + DreamCast): live sessions
+    // add the "casting to <device>" state on the top bar.
+    CastCoordinator.instance.addListener(_onCastSessionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncOrientationFromPlatform();
     });
@@ -621,6 +625,24 @@ class _PlayerScreenState extends State<PlayerScreen>
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger?.showSnackBar(
       SnackBar(content: Text(ok ? 'Casting to ${CastManager.instance.deviceName ?? 'receiver'}' : 'Cast failed to start')),
+    );
+  }
+
+  /// Opens the unified Sheet: Google Cast devices, DreamPlayer receivers
+  /// (DreamCast) and DLNA/AVTransport televisions.
+  ///
+  /// A live DLNA/Dream session pauses local playback, so Chrome Cast needs
+  /// no separate pause (the system controller owns the handoff); casting is
+  /// border-heavy — always stopped before the player screen returns to local
+  /// playback, so nothing gets stuck remote-only.
+  Future<void> _openSendToTvSheet() async {
+    _showControls();
+    final video = _current;
+    await SendToTvSheet.show(
+      context,
+      video: video,
+      positionMs: _livePositionMs,
+      title: _displayTitle,
     );
   }
 
@@ -4364,6 +4386,8 @@ Future<void> _offerVc1Mpv() async {
     WidgetsBinding.instance.removeObserver(this);
     TmdService.instance.removeListener(_onTmdbChanged);
     CastManager.instance.removeListener(_onCastSessionChanged);
+    CastCoordinator.instance.removeListener(_onCastSessionChanged);
+    CastCoordinator.instance.detachViewer();
     _hideTimer?.cancel();
     _sleepTicker?.cancel();
     _swipeOverlayTimer?.cancel();
@@ -8087,12 +8111,26 @@ if (mounted) setState(_applySwipeValue);
                                 ],
                               ),
                             ),
-                             if (AirPlayButton.isSupported) ...[
-                               const AirPlayButton(),
-                               const SizedBox(width: 4),
-                             ],
-                             const CastButton(),
-                             const SizedBox(width: 4),
+                              if (AirPlayButton.isSupported) ...[
+                                const AirPlayButton(),
+                                const SizedBox(width: 4),
+                              ],
+                              // Send-to-TV: a Flutter button (not the old
+                              // CastButtonView platform view) opening the
+                              // unified sheet over Google Cast, DLNA and
+                              // DreamCast targets. Shown connected while a
+                              // session is live.
+                              if (Platform.isAndroid)
+                                _TvControlButton(
+                                  onPressed: _openSendToTvSheet,
+                                  icon: Icon(
+                                    CastCoordinator.instance.isCasting
+                                        ? Icons.cast_connected
+                                        : Icons.cast,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              const SizedBox(width: 4),
                              _TvControlButton(
                                  onPressed: _openVideoInfoSheet,
                                  icon: const Icon(Icons.info_outline),

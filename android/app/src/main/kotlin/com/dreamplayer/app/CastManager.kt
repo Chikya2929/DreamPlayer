@@ -10,6 +10,8 @@ import com.google.android.gms.cast.MediaMetadata
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
+import androidx.mediarouter.app.MediaRouteChooserDialogFragment
+import androidx.fragment.app.FragmentActivity
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -89,6 +91,35 @@ class CastManager(private val context: Context) {
 
     private fun onMethod(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "openPicker" -> {
+                // The unified "Send to TV" sheet reaches the Google picker
+                // programmatically: the dialog fragment opens against the
+                // CastContext's merged selector without needing a visible
+                // MediaRouteButton in the tree. Requires an AppCompat
+                // FragmentActivity (MainActivity is FlutterFragmentActivity)
+                // and the mediaRouteTheme style (a missing one crashed in
+                // calculateContrast on this device).
+                val activity = context as? FragmentActivity
+                val contextCast = castContext()
+                if (activity == null || contextCast == null) {
+                    result.success(mapOf("ok" to false, "error" to "no_activity"))
+                    return
+                }
+                try {
+                    val selector = contextCast.mergedSelector
+                    if (selector == null) {
+                        result.success(mapOf("ok" to false, "error" to "no_selector"))
+                        return
+                    }
+                    val fragment = MediaRouteChooserDialogFragment()
+                    fragment.routeSelector = selector
+                    fragment.show(activity.supportFragmentManager, "dreamcast")
+                    result.success(mapOf("ok" to true))
+                } catch (e: Throwable) {
+                    Log.w(TAG, "openPicker failed: ${e.message}")
+                    result.success(mapOf("ok" to false, "error" to e.message))
+                }
+            }
             "getState" -> result.success(
                 mapOf(
                     "available" to (castContext() != null),

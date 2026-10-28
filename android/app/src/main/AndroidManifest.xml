@@ -415,6 +415,15 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
+        <!-- "Play on TV" receiver: another DreamPlayer (e.g. a phone) can
+             discover this device over UDP broadcast and push a video here.
+             The stick/TV is not a Chromecast, so it can only be sent to by
+             our own app; the service is enabled from Settings on TV devices
+             and answers only "Open with"-style VIEW intents it builds itself. -->
+        <service
+            android:name=".DreamCastReceiverService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
         <!-- Routes headset / Bluetooth media-button events to the session
              (also the restart target of notification action PendingIntents). -->
         <receiver

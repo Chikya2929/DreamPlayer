@@ -115,6 +115,9 @@ class MainActivity : FlutterFragmentActivity() {
         MulticastLockManager(this).configure(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dreamplayer/multicast"),
         )
+        DreamCast(this).configure(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DreamCast.CHANNEL),
+        )
         SMBClient(this).configure(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SMBClient.CHANNEL),
         )
@@ -350,7 +353,10 @@ class MainActivity : FlutterFragmentActivity() {
             }
             else -> {
                 payload["uri"] = data.toString()
-                payload["title"] = data.lastPathSegment
+                // DreamCast receiver / external senders pass a title that
+                // says more than the URL path can (query params, tokens).
+                payload["title"] =
+                    intent.getStringExtra("dp_title") ?: data.lastPathSegment
             }
         }
         return payload

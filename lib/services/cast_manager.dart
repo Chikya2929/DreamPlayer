@@ -95,6 +95,15 @@ class CastManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Opens the native Cast device-picker dialog.
+  Future<void> openPicker() async {
+    try {
+      await _methodChannel.invokeMethod('openPicker');
+    } on PlatformException {
+      // ignored — the picker availability mirrors `available`
+    }
+  }
+
   /// Opens the fullscreen expanded controller, if a session is live.
   Future<void> stopCasting() async {
     try {
