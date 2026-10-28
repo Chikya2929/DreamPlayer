@@ -50,16 +50,23 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
   speakers — use at your own risk", and swiping the brightness past 80%
   flashes "Brightness above 80% drains the battery faster". Each warning
   appears once, at the moment you cross the line, and never blocks playback.
-- **Cast button in the player (Android).** The player's top bar now hosts the
-  system Cast route picker: when a genuine Chromecast or Google-TV receiver is
-  on the same Wi-Fi it appears in the picker, and picking one loads the current
-  video on the TV at the position you were watching, pausing local playback.
-  Opening a local, SMB or other non-URL source on a receiver is refused with a
-  clear message instead of attempting an unloadable cast — those need the
-  planned LAN media-server bridge. Shops TVs without a Cast receiver (for
-  example a Hisense on VIDAA, which pairs with YouTube directly but has no
-  Chromecast receiver) stay absent from the picker honestly rather than being
-  faked.
+- **Play on TV — unified send menu in the player (Android).** The top-bar cast
+  button now opens one "Play on TV" sheet with every way DreamPlayer can put a
+  video somewhere bigger:
+  - **Chromecast / Google TV…** — the system Cast picker for genuine Chromecast
+    receivers (only offered when the source is a direct http(s) URL the
+    receiver can fetch).
+  - **DLNA TVs** — any smart TV that advertises a UPnP MediaRenderer (Hisense
+    VIDAA included) gets picked up automatically and takes the video over
+    AVTransport metadata; local playback pauses while the TV plays it, and the
+    sheet can stop the session.
+  - **DreamPlayer on another device** — a DreamPlayer install on the same
+    network (for example on a Fire TV Stick) acts as a receiver: it appears in
+    the sheet and opens the pushed video through its own player, with its
+    decoder, HUD and subtitle support intact. The receiver is enabled
+    automatically on TV devices.
+  Sources the TV can't reach honestly stay local and are told so, instead of a
+  cast that loads nothing.
 
 ### Changed
 

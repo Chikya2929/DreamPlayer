@@ -2538,16 +2538,47 @@ the viewer. The user's own choice stays the ceiling.
 mild / hot / critical) forces a tier so the downgrade path can be verified on
 a phone that is not actually hot. The release workflow passes no such define.
 
-**Step 4 — Google Cast on Android. BUILT (2026-10-28, rebuilt from scratch per
-official docs after the first attempt was reverted by the user; commits
-`6c8959b` + the rebuild).** `play-services-cast-framework` 22.3.1 + the system
-`MediaRouteButton` in the player top bar (a `CastButtonView` platform view,
-`dreamplayer/cast`, next to the AirPlay block). `CastManager.kt` /
-`CastOptionsProvider.kt` (receiver `CC1AD845`), Dart
-`lib/services/cast_manager.dart` + `lib/widgets/cast_button.dart`, channels
-`dreamplayer/cast` / `dreamcast/cast_events`. Engine-agnostic snapshot
-(one snapshot for Media3 and MPV → `resolveContentUrl` → `RemoteMediaClient.load`),
-as planned above. Verify before merging: on-device — Media3 local 4K/DV still composites `BT2020_ITU_PQ` (dumpsys), Media3 local play/seek **without stutter/regression**, mpv local play/seek **without stutter**.
+**Step 4 — Sending to bigger screens on Android. Google Cast BUILT (2026-10-28,
+rebuilt from scratch per official docs after the first attempt was reverted by
+the user; commit `6c8959b` + the rebuild), then EXTENDED into a unified
+"Play on TV" sheet (commit `b6d6ae8`).** `play-services-cast-framework`
+22.3.1 + `CastManager.kt` / `CastOptionsProvider.kt` (receiver `CC1AD845`),
+Dart `lib/services/cast_manager.dart`, channels `dreamplayer/cast` /
+`dreamcast/cast_events`. Engine-agnostic snapshot (one snapshot for Media3
+and MPV → `resolveContentUrl` → `RemoteMediaClient.load`). The top-bar
+button is a FLUTTER button (`lib/widgets/send_to_tv_sheet.dart`), not the
+old `CastButtonView` platform view — it opens one sheet over all three
+transports:
+
+- **Google Cast** — `openPicker` (a Dart-side call now) shows
+  `MediaRouteChooserDialogFragment` with the merged selector. Shown in the
+  sheet only for `CastEligibility.directPlayable` sources (direct http(s),
+  no headers, non-loopback); `needsLocalServer` rows are shown disabled with
+  the reason, `unreachable` sources hide the row.
+- **DLNA (Hisense VIDAA etc.)** — `lib/services/dlna_client.dart`: SSDP
+  M-SEARCH via native `discoverDlna` (`MulticastLockManager.kt`, multicast
+  lock required), description.xml parse (hand-rolled regex — do NOT add an
+  XML dependency for three fields), full AVTransport SOAP
+  (SetAVTransportURI / Play / Pause / Stop / GetPositionInfo / Seek
+  REL_TIME), a target deduped by USN prefix, and a session polling
+  GetPositionInfo every 2 s. Local playback pauses on cast; `stop()` sends
+  AVTransport Stop and does NOT auto-resume locally.
+- **DreamCast receiver** — `DreamCast.kt` (channel `dreamplayer/dreamcast`):
+  a `dataSync` foreground service that answers a UDP broadcast on port
+  **51717** (`DREAMCAST_HERE\n<name>\n<http port>\n<token>`) and serves a
+  token-gated `GET /ping` + `POST /play` ({uri,title} JSON) that launches
+  ACTION_VIEW video/* with a `dp_title` extra → MainActivity `intentPayload`
+  sets it as the title → normal open pipeline. Auto-enabled on TV devices
+  from home-init via `DreamCastClient.setReceiverEnabled(true)`. The HTTP
+  port is persisted (`flutter.dreamplayer.dreamcastPort`, 50000–59999).
+- Coordinator: `lib/services/cast_coordinator.dart` (singleton
+  `CastCoordinator.instance`) — casting pauses local playback, sheet shows
+  position from the DLNA poll, Google Cast resumes nothing locally (the
+  system controller owns the handoff back).
+
+Verify before merging: on-device — Media3 local 4K/DV still composites
+`BT2020_ITU_PQ` (dumpsys), Media3 local play/seek **without
+stutter/regression**, mpv local play/seek **without stutter**.
 
 TRAPS, each cost a build — do not re-learn:
 
@@ -2583,8 +2614,31 @@ TRAPS, each cost a build — do not re-learn:
    from trap 1a.
 
 what remains: verify a real session with an actual Chromecast/Google-TV receiver,
-which this network had zero of at commit time; and the "cast an SMB source"
-step requires the LAN binder (0.0.0.0 bind + setting) noted ABOVE.
+which this network had zero of at commit time; verify DLNA against a powered-on
+Hisense (standby/awake state did not answer SSDP during the build); verify the
+DreamCast receiver end-to-end with DreamPlayer on the Fire TV Stick; and the
+"cast an SMB source" step requires the LAN binder (0.0.0.0 bind + setting) noted ABOVE.
+
+**Send-to-TV traps (b6d6ae8) — none shipped a broken build, all found in review:**
+
+6. **The DLNA UsN dedupe must split on `::` first.** A MediaRenderer device and
+   its AVTransport service both answer an M-SEARCH with different NT/ST values
+   but the SAME `uuid:` prefix, so keying the map on the whole USN doubles every
+   TV in the sheet.
+7. **`InetSocketAddress("0.0.0.0")` is a hostname lookup, not a bind address.**
+   It does not compile to a literal wildcard (String ctor, i.e. a DNS resolver
+   dependency on the hot path). Bind with `ServerSocket()` + `reuseAddress` +
+   `bind(InetSocketAddress(port))`, and pick the port with the existing
+   free-port probe before the service foregrounds (used by the persisted
+   `dreamcastPort` pref) — the discovered port must equal the bound port.
+8. **The receiver's pushed title flows through the viewer's normal intent
+   pipeline** — `intentPayload`'s `else` branch now reads `dp_title` extra
+   first and falls back to `Uri.lastPathSegment`, so a query-string URL
+   (`?token=…/v.mkv`) does not render as a garbage title in HUD/media
+   notification.
+9. **A `Future.wait` over differently-typed futures infers `List<Object>`** and
+   fails assignment to the typed fields — await them separately (or type the
+   wait) once you see `invalid_assignment` in the sheet's discover block.
 
 
 **Step 5 — Real (motion-compensated) interpolation without patching mpv.**
@@ -3500,6 +3554,9 @@ test/
   settings_metadata_provider_layout_test.dart # three equal cells never clip (411dp = reporter's width)
   tmd_store_persist_test.dart      # TmdStore writes coalesce; nothing lost mid-write (iOS freeze fix)
   local_library_rescan_test.dart   # issue #39 rescan: id preservation, add-only fallback, root reconstruction, applyDiff ordering
+  dlna_client_test.dart            # DLNA controlURL resolution, desc parse, SOAP/DIDL, UPnP rel-time round-trip
+  cast_coordinator_test.dart       # Google eligibility gates Cast, not the local transports
+  send_to_tv_sheet_test.dart       # sheet rows: Google hidden for non-URL sources, Stop row while casting
   episode_label_test.dart         # offline episode title fallbacks (TMDB name -> S01E05 -> file name)
   episode_row_test.dart           # shared EpisodeRow: sizes, tap/long-press, icon fallback, no overflow
   episode_row_series_test.dart    # the REAL season-row title/subtitle widgets at phone widths
