@@ -7,6 +7,13 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **The phone's temperature now decides how hard the picture effects work.**
+  While the MPV engine is playing, DreamPlayer reads Android's thermal
+  headroom and eases the GPU-heavy features down when the phone gets warm:
+  the frame interpolation target is capped, the Anime4K preset steps down,
+  and at the "about to throttle" level both are switched off. The picture
+  panel says when it happens and why. It never raises them again on its own,
+  so the picture does not keep changing under you.
 - **HDR tone-mapping profiles for the MPV engine.** The MPV picture panel
   (the sliders button at the top right of the player) now has an **HDR
   output** picker with three shader-driven profiles next to the existing

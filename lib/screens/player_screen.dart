@@ -61,6 +61,8 @@ import '../utils/codec_info.dart';
 import '../utils/vc1_codec.dart';
 import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
+import '../utils/thermal_policy.dart';
+import '../services/thermal_monitor.dart';
 import '../widgets/airplay_button.dart';
 import '../widgets/format_chip.dart';
 import '../widgets/gesture_warning_pill.dart';
@@ -180,6 +182,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   DefaultEngine _defaultEngine = DefaultEngine.auto;
   ToneMapMode _toneMapMode = ToneMapMode.sdr;
   MpvInterpolationConfig _mpvInterpolation = const MpvInterpolationConfig();
+  ThermalTier _thermalTier = ThermalTier.normal;
+  double _thermalHeadroom = -1;
   /// Cached from the first successful [_mpvGpuNextAvailable] probe on this
   /// player — drives the HDR badge (Native can show real DV/HDR only when
   /// libplacebo/gpu-next is present).
@@ -1290,6 +1294,12 @@ Future<void> _offerVc1Mpv() async {
       _mpvAnime4kApplied = false;
       _mpvAnime4kError = null;
       _mpvAnime4kHwdecCopy = false;
+      // Thermal headroom: the GPU-heavy picture features (Anime4K, frame
+      // interpolation) are the ones that heat the phone, so the device's
+      // temperature decides how far they may go.
+      ThermalMonitor.instance.removeListener(_onThermalChanged);
+      ThermalMonitor.instance.addListener(_onThermalChanged);
+      ThermalMonitor.instance.start();
       _mpvSpatialSub ??= SystemControls.instance.spatialAudioChanges.listen((status) {
         if (!mounted || !_mpvActive || _liveSpatial == status) return;
         setState(() {
@@ -1971,6 +1981,49 @@ Future<void> _offerVc1Mpv() async {
     final player = _mpvPlayer;
     if (player != null) {
       await _applyMpvToneMap(player);
+    }
+  }
+
+  /// The device got warmer (or cooler): apply the thermal policy.
+  void _onThermalChanged() {
+    if (!mounted || !_mpvActive) return;
+    final tier = ThermalMonitor.instance.tier;
+    final headroom = ThermalMonitor.instance.headroom;
+    debugPrint(
+      'mpv: thermal tier=${tier.name} headroom=${headroom.toStringAsFixed(2)}',
+    );
+    unawaited(_applyThermalPolicy(tier, headroom));
+  }
+
+  /// Lowers the GPU-heavy picture features to what the temperature allows.
+  ///
+  /// It never raises them again: a phone that heats up and cools down would
+  /// otherwise flap between presets every ten seconds, and the picture would
+  /// keep changing under the viewer. The user's own choice stays the ceiling.
+  Future<void> _applyThermalPolicy(ThermalTier tier, double headroom) async {
+    final limit = thermalLimitFor(tier);
+    if (mounted) {
+      setState(() {
+        _thermalTier = tier;
+        _thermalHeadroom = headroom;
+      });
+    }
+    if (_mpvInterpolation.targetFps > limit.maxInterpolationFps) {
+      await _setMpvInterpolationConfig(
+        targetFps: limit.maxInterpolationFps,
+      );
+    }
+    if (_mpvAnime4kEnabled) {
+      if (!limit.allowAnime4k) {
+        debugPrint('mpv: thermal critical — Anime4K off');
+        await _setMpvAnime4kEnabled(false);
+      } else {
+        final stepped = anime4kModeForTier(tier, _mpvAnime4kMode);
+        if (stepped != null) {
+          debugPrint('mpv: thermal ${tier.name} — Anime4K ${_mpvAnime4kMode.name} -> ${stepped.name}');
+          await _setMpvAnime4kMode(stepped);
+        }
+      }
     }
   }
 
@@ -4285,6 +4338,8 @@ Future<void> _offerVc1Mpv() async {
     _mpvAnime4kApplied = false;
     _unobserveMpvAudioOutput();
     unawaited(SystemControls.instance.clearSpatialAudioStatus());
+    ThermalMonitor.instance.removeListener(_onThermalChanged);
+    ThermalMonitor.instance.stop();
     unawaited(_mpvPlayer?.dispose());
     unawaited(_stopMpvProxy());
     // Tell the native pip bridge the fallback engine is gone (clears its
@@ -8274,6 +8329,8 @@ if (mounted) setState(_applySwipeValue);
                           toneMapNotice: _mpvHdrModeNotice,
                           gpuNextAvailable: _mpvGpuNext == true,
                           interpolation: _mpvInterpolation,
+                          thermalTier: _thermalTier,
+                          thermalHeadroom: _thermalHeadroom,
                           onChanged: _updateMpvPicture,
                           onAnime4kChanged: _setMpvAnime4kEnabled,
                           onAnime4kModeChanged: _setMpvAnime4kMode,
@@ -8311,6 +8368,8 @@ class _MpvPictureControls extends StatelessWidget {
     required this.toneMapNotice,
     required this.gpuNextAvailable,
     required this.interpolation,
+    required this.thermalTier,
+    required this.thermalHeadroom,
     required this.onChanged,
     required this.onAnime4kChanged,
     required this.onAnime4kModeChanged,
@@ -8333,6 +8392,8 @@ class _MpvPictureControls extends StatelessWidget {
   final String? toneMapNotice;
   final bool gpuNextAvailable;
   final MpvInterpolationConfig interpolation;
+  final ThermalTier thermalTier;
+  final double thermalHeadroom;
   final void Function(String property, double value) onChanged;
   final Future<void> Function(bool enabled) onAnime4kChanged;
   final Future<void> Function(Anime4kMode mode) onAnime4kModeChanged;
@@ -8509,6 +8570,36 @@ class _MpvPictureControls extends StatelessWidget {
                    ),
                  ],
                ),
+               if (thermalTier != ThermalTier.normal)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 4),
+                   child: Row(
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       Icon(
+                         thermalTier == ThermalTier.critical
+                             ? Icons.whatshot
+                             : Icons.thermostat,
+                         color: thermalTier == ThermalTier.critical
+                             ? Colors.orangeAccent
+                             : Colors.amberAccent,
+                         size: 16,
+                       ),
+                       SizedBox(width: 6),
+                       Expanded(
+                         child: Text(
+                           thermalTier == ThermalTier.critical
+                               ? 'The phone is hot (${(thermalHeadroom * 100).round()}%) — frame interpolation and Anime4K were switched down.'
+                               : 'The phone is warm (${(thermalHeadroom * 100).round()}%) — the frame rate is capped at ${thermalLimitFor(thermalTier).maxInterpolationFps} fps.',
+                           style: const TextStyle(
+                             color: Colors.amberAccent,
+                             fontSize: 11,
+                           ),
+                         ),
+                       ),
+                     ],
+                   ),
+                 ),
                if (toneMapNotice != null)
                  Padding(
                    padding: const EdgeInsets.only(top: 4),

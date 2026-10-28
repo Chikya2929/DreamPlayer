@@ -2512,6 +2512,32 @@ headroom → cheapest tier; below 0.60 → one step down; below 0.80 → cap. Th
 the one piece of their design we can implement exactly, because the Android API
 is public and the policy is ours to write.
 
+**What landed (2026-10-28):**
+- Native: `android/.../ThermalMonitor.kt`, channel **`dreamplayer/thermal`**,
+  method `getThermalHeadroom` → a double. `getThermalHeadroom` is **API 30+**,
+  so older devices answer **-1** — which the Dart side reads as "no reading"
+  and leaves the quality alone (it must NOT be treated as a cold reading).
+- Policy (pure Dart, unit-tested): `lib/utils/thermal_policy.dart`.
+  `thermalTierFor(headroom)` → normal ≥ 0.80 · mild ≥ 0.60 · hot ≥ 0.40 ·
+  critical below; `thermalLimitFor(tier)` → the interpolation cap
+  (120 / 60 / 48 / 0) and whether Anime4K may run; `anime4kModeForTier`
+  steps the preset down one notch at the `hot` tier
+  (C+A → A+A → A, B+B → A+A, C → B, B → A).
+- Monitor: `lib/services/thermal_monitor.dart` — a `ChangeNotifier` that
+  samples every 10 s while the MPV engine plays, and stops with the player.
+- Player: `_applyThermalPolicy` lowers the interpolation target and the
+  Anime4K preset when the tier drops; the picture panel shows a line with the
+  reading and what was capped.
+
+**The policy is ONE-WAY on purpose.** It never raises the quality back when
+the phone cools down: a device that heats up and cools again would flap
+between presets every ten seconds and the picture would keep changing under
+the viewer. The user's own choice stays the ceiling.
+
+**Test hook:** `--dart-define=THERMAL_SIMULATE_TIER=hot` (values: normal /
+mild / hot / critical) forces a tier so the downgrade path can be verified on
+a phone that is not actually hot. The release workflow passes no such define.
+
 **Step 4 — Google Cast on Android.**
 `play-services-cast-framework` + a `MediaRouteButton` in the player chrome.
 Model it on their **engine-agnostic snapshot** (one snapshot object for both

@@ -137,6 +137,9 @@ class MainActivity : FlutterActivity() {
         AppUpdater(this).configure(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AppUpdater.CHANNEL),
         )
+        ThermalMonitor(this).configure(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ThermalMonitor.CHANNEL),
+        )
         intentChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "dreamplayer/intent",
