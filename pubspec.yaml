@@ -90,6 +90,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/anime4k/
+    # hdr-toys user shaders (MIT) for the MPV HDR modes. mpv loads user
+    # shaders from the filesystem, so the app copies them out of the bundle
+    # on first use — the asset list is what makes them reachable at all.
+    - assets/hdr_toys/
     # App icon variants shown in the preview list (issue #23). The shipped
     # launcher bitmaps are generated from these; they are listed here so the
     # settings picker can render a real preview rather than a colour swatch.

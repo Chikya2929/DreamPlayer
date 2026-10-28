@@ -692,7 +692,8 @@ A video player app supporting:
   stock binary (libplacebo/gpu-next for issue #21 tone-map). See roadmap
   "MPV without media_kit" for on-device gates.
 - **MPV HDR tone-map mode (issue #21, 2026-09-23, 0.4.8)**: Settings → Player
-  "HDR tone-map (MPV)" + player ⋮ sheet — **SDR tone-map** (libplacebo
+  "HDR tone-map (MPV)" + the player's picture panel (top-right sliders
+  button) — **SDR tone-map** (libplacebo
   `gpu-next` + spline / perceptual / BT.709 / BT.1886) vs **Native HDR/DV**.
   Custom arm64 `libmpv.so` with libplacebo ships in
   `android/app/src/main/jniLibs/` (Gradle `pickFirsts`). `_mpvGpuNextAvailable`
@@ -808,10 +809,13 @@ A video player app supporting:
   - **Chip layout**: landscape puts back button + title + chips in one `Wrap` on the same row; portrait shows title row, then chips `Wrap` below.
 ### Frame interpolation for the MPV engine (issue #53) — read this before touching it
 
-**The feature**: Settings → Player → **"Frame interpolation (MPV)"** and the same
-section in the player's ⋮ sheet. Pick a target rate (Off / 30 / **48** / 60 /
-120) and a quality (Sharp = `oversample`, Balanced = `linear`, Smooth =
-`bicubic`). The ⋮ sheet applies it live; Settings applies it at the next open.
+**The feature**: Settings → Player → **"Frame interpolation (MPV)"** and the
+**picture panel** (the sliders button at the TOP RIGHT of the player,
+`_MpvPictureControls`). Pick a target rate (Off / 30 / **48** / 60 / 120) and
+a quality (Sharp = `oversample`, Balanced = `linear`, Smooth = `bicubic`).
+The picture panel applies it live; Settings applies it at the next open. It
+was in the ⋮ sheet until 2026-10-28, when the user asked for it to move into
+the picture panel next to the HDR output mode — the ⋮ sheet was crowded.
 Store: `lib/services/mpv_interpolation_store.dart` (prefs
 `dreamplayer.mpvInterpolationFps` / `…Filter`), pure option mapping in
 `lib/utils/mpv_interpolation.dart`, applied by `_applyMpvInterpolation`
@@ -2443,7 +2447,7 @@ confirmed Anime4K still works on 1080p via the MPV engine.
 
 **The one gap left is (b) thermal tiering**, which is step 3.
 
-**Step 2 — MPV HDR mode matrix (OFF / hdr-toys PQ / HLG / BT.2020 / Linear).**
+**Step 2 — MPV HDR mode matrix (OFF / hdr-toys PQ / HLG / BT.2020 / Linear) — SHIPPED (2026-10-28).**
 Replace the single "SDR tone-map" mode with the full matrix, and adopt their
 state policy: the GLSL pipeline owns transfer/gamut/tone → `target-colorspace-hint=no`
 + fixed `target-prim`/`target-trc`; mpv-native → `target-colorspace-hint=yes`
@@ -2453,6 +2457,53 @@ is the rule that stops a mode change leaving stale primaries/TRC behind. The
 existing tone-map mode (`spline` / `perceptual` / `bt.709` / `bt.1886`) stays as
 the OFF-path fallback, and the "SDR only — no Dolby Vision / HDR" honesty in the
 info sheet must keep matching whatever mode is active.
+
+**What landed:**
+- `ToneMapMode` (`lib/services/tone_map_store.dart`) is now
+  `sdr | native | linear | pq | hlg | bt2020`; the pref key is unchanged
+  (`dreamplayer.toneMapMode`), so old installs keep working.
+- `lib/utils/mpv_hdr_mode.dart` owns the **complete** property set
+  (`mpvHdrOwnedProperties`, 10 properties) and maps a mode to its values.
+  `_applyMpvToneMap` writes **all ten on every switch** — the bug this fixed
+  was real: sdr→native left `target-prim=bt.709` / `target-trc=bt.1886` in
+  place, so "Native HDR/DV" still tone-mapped to SDR.
+- **hdr-toys** (MIT, upstream `github.com/natural-harmonia-gropius/hdr-toys` —
+  NOT `quietvoid/hdr-toys`) is vendored in `assets/hdr_toys/` (7 shaders +
+  LICENSE). `lib/services/hdr_toys_shader_store.dart` copies them to the
+  app-support dir (mpv needs real paths) and hands back each profile's chain:
+  PQ = `clip_both → pq_inv → astra → bottosson → bt1886`, HLG = the same with
+  `hlg_inv`, BT.2020 = `bt1886_inv → bottosson → bt1886`.
+  `glsl-shader-opts` is **not** set: mpv indexes that list per shader and a
+  mis-aligned entry makes the shader fail to compile (black picture), so
+  astra's own default is used.
+- **The three shader profiles need `vo=gpu-next`** (libplacebo user shaders).
+  On a stock libmpv the player says so in a notice and falls back to the SDR
+  tone-map. The Anime4K chain (legacy GLSL, `vo=gpu`) and the hdr-toys chain
+  (libplacebo, `vo=gpu-next`) are **mutually exclusive**: there is ONE
+  `glsl-shaders` list and the chain is always cleared **before** the `vo`
+  switch.
+
+**TRAP — `$root.path` in a string interpolates the OBJECT, not the property.**
+Dart's `$identifier` interpolation is a simple identifier only: `'$root.path'`
+inserts `root.toString()` (i.e. `Directory: '/data/...'`) and then the literal
+text `.path`. The path becomes garbage, the copy fails, and every hdr-toys
+profile reports "Could not load shaders". Worse, the garbage path is
+**relative**, so the files were written into the process's working directory
+(a `Directory: '/` folder appeared in the repo root during a test run).
+The analyzer's `unnecessary_brace_in_string_interps` lint **is wrong about
+property access** — it told us to drop the braces from `${root.path}` and that
+is exactly what broke it. Use a local (`final rootPath = root.path;`) or keep
+the braces. `test/hdr_toys_shader_store_test.dart` now mocks the
+path_provider channel and asserts the copied files exist **inside** the
+support directory, which is the regression test for this.
+
+**Where the controls live (user request, 2026-10-28).** The HDR output mode and
+the frame interpolation (target fps + quality) are in the **picture panel** —
+the sliders button at the TOP RIGHT of the player (`_MpvPictureControls`,
+`_openMpvPictureControls`), next to the picture sliders and Anime4K. They were
+removed from the ⋮ overflow sheet: it was getting crowded, and the panel is
+where the other MPV-only picture settings already were. The Settings →
+Player entries stay as the persistent default.
 
 **Step 3 — Thermal-aware quality (Android API, no new dependency).**
 `PowerManager.getThermalHeadroom(10)` (API 30+), sampled every 10 s while
@@ -2570,7 +2621,7 @@ Vulkan ImageReader path exists.
 
 **Phase 3 landed (custom libmpv + libplacebo):**
 - `android/app/src/main/jniLibs/arm64-v8a/libmpv.so` (~29 MB, NDK r30) with **libplacebo + gpu-next** linked (built via mpv-android buildscripts + NDK r30, Docker `dreamplayer-mpv-builder`); `libc++_shared.so` alongside. Gradle `packaging.jniLibs.pickFirsts` overrides media_kit's stock `libmpv.so`; media_kit's `libmediakitandroidhelper.so` is kept.
-- Tone-map UI: Settings → Player → "HDR tone-map (MPV)" + player ⋮ sheet (when `_mpvReady`) — **SDR tone-map** (`vo=gpu-next`, `tone-mapping=spline`, `gamut-mapping-mode=perceptual`, `target-prim=bt.709`, `target-trc=bt.1886`) vs **Native HDR/DV** (`target-colorspace-hint`). Store: `lib/services/tone_map_store.dart` (prefs `dreamplayer.toneMapMode`, default `sdr`).
+- Tone-map UI: Settings → Player → "HDR tone-map (MPV)" + the player's picture panel (when `_mpvReady`) — **SDR tone-map** (`vo=gpu-next`, `tone-mapping=spline`, `gamut-mapping-mode=perceptual`, `target-prim=bt.709`, `target-trc=bt.1886`) vs **Native HDR/DV** (`target-colorspace-hint`). Store: `lib/services/tone_map_store.dart` (prefs `dreamplayer.toneMapMode`, default `sdr`).
 - Apply: `_applyMpvToneMap` + `_mpvGpuNextAvailable` probe (`libplacebo-version` property) in `player_screen.dart`; wid-attach prefers `gpu-next` when available. Stock libmpv falls back to `vo=gpu` + bt.2390 extras in `_configureMpvAudio`.
 - Android-only gate (`defaultTargetPlatform == android`) so the tile never appears on iOS; regression test `test/settings_tone_map_platform_test.dart`.
 - **Scope note**: libplacebo runs only on the **MPV engine** (Play with MPV) — Media3's Surface cannot be intercepted (documented in issue #21 close comment). Media3 remains the DV/HDR passthrough engine.
@@ -2590,7 +2641,7 @@ Dart MpvEngineController  →  MethodChannel/EventChannel
 - **Dart**: `MpvEngineController` mirrors the `ExoPlayerController` surface; migrate `_mpv*` state in `player_screen.dart` (resume keys, external subs, PiP/`MpvPipService`, fit/zoom, custom subtitle overlay, gestures). **Remove media_kit `VideoController` + `Video` widget** from the mpv slot — replace with the new SurfaceView platform view (keep media_kit `Player` only if still needed for control until the JNI path is ready; goal is no Flutter texture for video). Engine choice (`PlayEngine.mpv`, “Play with MPV”) stays user-facing.
 - **libmpv build**: media_kit's stock `.so` is **`-Dvulkan=disabled -Dlibplacebo=disabled`** — gpu-next / libplacebo is impossible without a custom build. **Phase 3 custom build SHIPPED** under `android/app/src/main/jniLibs/arm64-v8a/libmpv.so` (libplacebo + gpu-next, NDK r30, built via mpv-android buildscripts in Docker `dreamplayer-mpv-builder`); Gradle `pickFirsts` overrides media_kit's binary. media_kit_libs_android_video still ships for `libmediakitandroidhelper.so` + other ABIs' stock libmpv (arm64 uses ours).
 - **Tone-map mode (issue #21) DONE 2026-09-23**: Settings → Player →
-  "HDR tone-map (MPV)" (`settingsToneMapMode`) + player ⋮ sheet section when
+  "HDR tone-map (MPV)" (`settingsToneMapMode`) + the picture panel row when
   `_mpvReady` — Native HDR/DV (`target-colorspace-hint`) vs SDR tone-map
   (`vo=gpu-next`, `tone-mapping=spline`, `gamut-mapping-mode=perceptual`,
   `target-prim=bt.709`, `target-trc=bt.1886`). Store:

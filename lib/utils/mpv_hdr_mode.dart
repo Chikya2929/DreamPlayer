@@ -74,5 +74,27 @@ Map<String, String> mpvHdrProperties(ToneMapMode mode) {
         'inverse-tone-mapping': 'yes',
         'hdr-compute-peak': 'yes',
       },
+    // The hdr-toys profiles: the GLSL chain owns transfer, gamut and tone,
+    // so gpu-next must NOT negotiate a second HDR transform on top of it —
+    // that is why the colorspace hint is off and the tone-mapping is
+    // "clip" (the shaders do the work).
+    ToneMapMode.pq => _hdrToys('bt.2020', 'pq'),
+    ToneMapMode.hlg => _hdrToys('bt.2020', 'hlg'),
+    ToneMapMode.bt2020 => _hdrToys('bt.2020', 'bt.1886'),
+  };
+}
+
+Map<String, String> _hdrToys(String targetPrim, String targetTrc) {
+  return {
+    'target-colorspace-hint-mode': 'target',
+    'target-peak': 'auto',
+    'hdr-reference-white': '203',
+    'target-colorspace-hint': 'no',
+    'target-prim': targetPrim,
+    'target-trc': targetTrc,
+    'tone-mapping': 'clip',
+    'gamut-mapping-mode': 'clip',
+    'inverse-tone-mapping': 'no',
+    'hdr-compute-peak': 'no',
   };
 }

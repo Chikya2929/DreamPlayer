@@ -491,6 +491,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsToneMapLinearDesc => '将画面提升到 HDR 范围 (不支持杜比视界)';
 
   @override
+  String get settingsToneMapBt2020Desc =>
+      '使用 hdr-toys 的广色域色调映射 (需要 libplacebo)';
+
+  @override
+  String get settingsToneMapHlgDesc => '使用 hdr-toys 将 HLG 色调映射 (需要 libplacebo)';
+
+  @override
+  String get settingsToneMapPqDesc =>
+      '使用 hdr-toys 将 HDR10 色调映射 (需要 libplacebo)';
+
+  @override
   String get settingsMpvInterpolation => '帧插值 (MPV)';
 
   @override

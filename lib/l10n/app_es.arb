@@ -627,6 +627,18 @@
   "@settingsToneMapLinearDesc": {
     "description": "Linear HDR mode subtitle"
   },
+  "settingsToneMapBt2020Desc": "Mapa de tonos de gama amplia con hdr-toys (necesita libplacebo)",
+  "@settingsToneMapBt2020Desc": {
+    "description": "BT.2020 wide-gamut mode subtitle"
+  },
+  "settingsToneMapHlgDesc": "Mapear HLG a tonos con hdr-toys (necesita libplacebo)",
+  "@settingsToneMapHlgDesc": {
+    "description": "BT.2100 HLG mode subtitle"
+  },
+  "settingsToneMapPqDesc": "Mapear HDR10 a tonos con hdr-toys (necesita libplacebo)",
+  "@settingsToneMapPqDesc": {
+    "description": "BT.2100 PQ (HDR10) mode subtitle"
+  },
   "settingsMpvInterpolation": "Interpolación de fotogramas (MPV)",
   "@settingsMpvInterpolation": {
     "description": "libmpv frame interpolation picker label"

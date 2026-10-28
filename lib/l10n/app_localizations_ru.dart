@@ -495,6 +495,18 @@ class AppLocalizationsRu extends AppLocalizations {
       'Поднять картинку в HDR-диапазон (без Dolby Vision)';
 
   @override
+  String get settingsToneMapBt2020Desc =>
+      'Широкий цветовой тонмаппинг через hdr-toys (нужен libplacebo)';
+
+  @override
+  String get settingsToneMapHlgDesc =>
+      'Тонмаппинг HLG через hdr-toys (нужен libplacebo)';
+
+  @override
+  String get settingsToneMapPqDesc =>
+      'Тонмаппинг HDR10 через hdr-toys (нужен libplacebo)';
+
+  @override
   String get settingsMpvInterpolation => 'Интерполяция кадров (MPV)';
 
   @override

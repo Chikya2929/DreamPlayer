@@ -14,10 +14,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// into the HDR range and the display renders it as HDR. No shaders, no
 /// custom libmpv beyond gpu-next; it is a boost, not a true Dolby Vision
 /// passthrough.
+///
+/// [pq] / [hlg] / [bt2020] — the hdr-toys shader profiles (MIT). They need
+/// `vo=gpu-next` (libplacebo) — the stock libmpv build cannot run them.
 enum ToneMapMode {
   sdr('sdr', 'SDR tone-map'),
   native('native', 'Native HDR/DV'),
-  linear('linear', 'Linear HDR');
+  linear('linear', 'Linear HDR'),
+  pq('pq', 'HDR10 (BT.2100 PQ)'),
+  hlg('hlg', 'HDR (BT.2100 HLG)'),
+  bt2020('bt2020', 'BT.2020 wide gamut');
 
   const ToneMapMode(this.value, this.label);
 
@@ -29,9 +35,19 @@ enum ToneMapMode {
   bool get handsHdrToDisplay =>
       this == ToneMapMode.native || this == ToneMapMode.linear;
 
+  /// Whether this mode runs the hdr-toys shader chain (and therefore needs
+  /// `vo=gpu-next`).
+  bool get usesHdrToysShaders =>
+      this == ToneMapMode.pq ||
+      this == ToneMapMode.hlg ||
+      this == ToneMapMode.bt2020;
+
   static ToneMapMode fromString(String? s) => switch (s) {
         'native' => ToneMapMode.native,
         'linear' => ToneMapMode.linear,
+        'pq' => ToneMapMode.pq,
+        'hlg' => ToneMapMode.hlg,
+        'bt2020' => ToneMapMode.bt2020,
         _ => ToneMapMode.sdr,
       };
 }

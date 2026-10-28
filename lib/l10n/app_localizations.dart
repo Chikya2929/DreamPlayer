@@ -1032,6 +1032,24 @@ abstract class AppLocalizations {
   /// **'Lift the picture into HDR range (no Dolby Vision)'**
   String get settingsToneMapLinearDesc;
 
+  /// BT.2020 wide-gamut mode subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Wide-gamut tone-map with hdr-toys (needs libplacebo)'**
+  String get settingsToneMapBt2020Desc;
+
+  /// BT.2100 HLG mode subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Tone-map HLG with hdr-toys (needs libplacebo)'**
+  String get settingsToneMapHlgDesc;
+
+  /// BT.2100 PQ (HDR10) mode subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Tone-map HDR10 with hdr-toys (needs libplacebo)'**
+  String get settingsToneMapPqDesc;
+
   /// libmpv frame interpolation picker label
   ///
   /// In en, this message translates to:

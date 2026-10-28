@@ -1662,6 +1662,9 @@ class _TmdDetailsScreenState extends State<TmdDetailsScreen> {
           ToneMapMode.native =>
             'Native HDR/DV passthrough — needs an HDR-capable display',
           ToneMapMode.linear => 'Linear HDR — brighter, but not Dolby Vision',
+          ToneMapMode.pq => 'HDR10 tone-mapped in-engine (hdr-toys)',
+          ToneMapMode.hlg => 'HLG tone-mapped in-engine (hdr-toys)',
+          ToneMapMode.bt2020 => 'Wide-gamut tone-map in-engine (hdr-toys)',
         },
         style: const TextStyle(fontSize: 11, color: Colors.white54),
         textAlign: TextAlign.center,

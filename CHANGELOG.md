@@ -7,6 +7,14 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **HDR tone-mapping profiles for the MPV engine.** The MPV picture panel
+  (the sliders button at the top right of the player) now has an **HDR
+  output** picker with three shader-driven profiles next to the existing
+  ones: **HDR10 (BT.2100 PQ)**, **HDR (BT.2100 HLG)** and **BT.2020 wide
+  gamut**. They use the MIT-licensed hdr-toys shader chains, so the picture is
+  tone-mapped by the GPU instead of being clipped to plain SDR. They need the
+  MPV build with libplacebo; on a build without it the player says so and
+  falls back to the ordinary SDR tone-map instead of doing nothing.
 - **Linear HDR for the MPV engine.** Settings → Player → "HDR tone-map (MPV)"
   now has a third option next to "SDR tone-map" and "Native HDR/DV": it lifts
   the picture into the HDR range and lets the display render it as HDR, with
@@ -38,6 +46,12 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Changed
 
+- **The MPV picture controls are all in one place now.** The HDR output mode
+  and the frame interpolation (target frame rate and quality) moved out of the
+  player's three-dot menu and into the picture panel — the sliders button at
+  the top right of the player, next to the picture sliders and Anime4K. The
+  three-dot menu was getting crowded, and the picture panel is where the other
+  MPV-only picture settings already lived.
 - **The centre transport buttons now read left to right the way they do
   everywhere else.** The cluster is previous chapter · back 10 s ·
   play/pause · forward 10 s · next chapter; before, the chapter skip sat

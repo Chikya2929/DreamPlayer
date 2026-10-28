@@ -493,6 +493,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Lift the picture into HDR range (no Dolby Vision)';
 
   @override
+  String get settingsToneMapBt2020Desc =>
+      'Wide-gamut tone-map with hdr-toys (needs libplacebo)';
+
+  @override
+  String get settingsToneMapHlgDesc =>
+      'Tone-map HLG with hdr-toys (needs libplacebo)';
+
+  @override
+  String get settingsToneMapPqDesc =>
+      'Tone-map HDR10 with hdr-toys (needs libplacebo)';
+
+  @override
   String get settingsMpvInterpolation => 'Frame interpolation (MPV)';
 
   @override

@@ -15,6 +15,7 @@ import '../services/continue_watching.dart';
 import '../services/badge_prefs.dart';
 import '../services/audio_track_store.dart';
 import '../services/anime4k_shader_store.dart';
+import '../services/hdr_toys_shader_store.dart';
 import '../services/default_engine_store.dart';
 import '../services/exo_player.dart';
 import '../services/file_browser.dart';
@@ -213,6 +214,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _mpvAnime4kApplying = false;
   String? _mpvAnime4kError;
   bool _mpvAnime4kHwdecCopy = false;
+  String? _mpvHdrModeNotice;
   VideoParams? _mpvVideoParams;
   Future<void>? _mpvAnime4kApplyChain;
   bool _mpvPictureControlsOpen = false;
@@ -1880,7 +1882,16 @@ Future<void> _offerVc1Mpv() async {
   }) async {
     final platform = player.platform;
     if (platform is! NativePlayer || _inTests) return;
+    var mode = _toneMapMode;
+    if (mounted && _mpvHdrModeNotice != null) {
+      setState(() => _mpvHdrModeNotice = null);
+    }
+
+    // Anime4K owns the legacy GL path (vo=gpu); hdr-toys needs vo=gpu-next.
+    // The two shader chains cannot be alive at the same time, so when
+    // Anime4K is on it owns `glsl-shaders` and the HDR chain is cleared.
     if (!ignoreAnime4k && _mpvAnime4kEnabled && _mpvAnime4kEligible) {
+      await _clearMpvGlslShaders(platform);
       try {
         await platform.setProperty('vo', 'gpu');
         await platform.setProperty('gpu-api', 'opengl');
@@ -1890,14 +1901,42 @@ Future<void> _offerVc1Mpv() async {
       }
       return;
     }
+
     final hasGpuNext = await _mpvGpuNextAvailable(player);
     if (!hasGpuNext) {
+      await _clearMpvGlslShaders(platform);
       await platform.setProperty('vo', 'gpu');
       debugPrint('mpv: stock libmpv — vo=gpu, tone-map mode ignored until Phase 3');
-      return;
+      if (mode.usesHdrToysShaders) {
+        // The hdr-toys profiles are libplacebo user shaders: the stock
+        // libmpv build cannot run them. Fall back to the SDR tone-map for
+        // this session and say so instead of silently doing nothing.
+        mode = ToneMapMode.sdr;
+        _setMpvHdrModeNotice(
+          '${_toneMapMode.label} needs the MPV build with libplacebo '
+          '(gpu-next) — using SDR tone-map instead.',
+        );
+      }
+    } else {
+      // Clear the chain BEFORE the video output is switched: the legacy GL
+      // renderer cannot compile the libplacebo-syntax hdr-toys shaders (and
+      // the other way round for Anime4K), and a shader that fails to
+      // compile means a black picture for a frame.
+      await _clearMpvGlslShaders(platform);
+      await platform.setProperty('vo', 'gpu-next');
+      if (mode.usesHdrToysShaders) {
+        final applied = await _applyMpvHdrToysShaders(platform, mode);
+        if (!applied) {
+          mode = ToneMapMode.sdr;
+          _setMpvHdrModeNotice(
+            'Could not load the ${_toneMapMode.label} shaders — '
+            'using SDR tone-map instead.',
+          );
+        }
+      }
     }
-    await platform.setProperty('vo', 'gpu-next');
-    final properties = mpvHdrProperties(_toneMapMode);
+
+    final properties = mpvHdrProperties(mode);
     for (final entry in properties.entries) {
       try {
         await platform.setProperty(entry.key, entry.value);
@@ -1906,8 +1945,123 @@ Future<void> _offerVc1Mpv() async {
       }
     }
     debugPrint(
-      'mpv: HDR mode applied (${_toneMapMode.value}) '
+      'mpv: HDR mode applied (${mode.value}) '
       '${properties.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
+    );
+  }
+
+  /// Switches the MPV HDR presentation mode at runtime.
+  ///
+  /// Shared by the overflow sheet and the picture panel so both paths behave
+  /// identically: the mode is persisted, then applied to the live player.
+  ///
+  /// Anime4K and the hdr-toys profiles cannot coexist — there is ONE
+  /// `glsl-shaders` list and the two chains use different shader dialects
+  /// (legacy GLSL on `vo=gpu` vs libplacebo syntax on `vo=gpu-next`). Picking
+  /// an hdr-toys profile therefore turns Anime4K off first; turning Anime4K
+  /// off re-applies the tone-map mode, which installs the new chain.
+  Future<void> _setMpvToneMapMode(ToneMapMode mode) async {
+    if (mode == _toneMapMode) return;
+    if (mounted) setState(() => _toneMapMode = mode);
+    await ToneMapStore.save(mode);
+    if (mode.usesHdrToysShaders && _mpvAnime4kEnabled) {
+      await _setMpvAnime4kEnabled(false);
+      return;
+    }
+    final player = _mpvPlayer;
+    if (player != null) {
+      await _applyMpvToneMap(player);
+    }
+  }
+
+  /// Applies a frame-interpolation change (target rate and/or filter) live.
+  Future<void> _setMpvInterpolationConfig({
+    int? targetFps,
+    MpvInterpolationFilter? filter,
+  }) async {
+    final next = _mpvInterpolation.copyWith(
+      targetFps: targetFps,
+      filter: filter,
+    );
+    if (next == _mpvInterpolation) return;
+    if (mounted) setState(() => _mpvInterpolation = next);
+    await MpvInterpolationStore.save(next);
+    final player = _mpvPlayer;
+    if (player != null) {
+      await _applyMpvInterpolation(player);
+    }
+  }
+
+  /// Clears mpv's user-shader list.
+  Future<void> _clearMpvGlslShaders(NativePlayer platform) async {
+    try {
+      await platform.command([
+        'change-list',
+        'glsl-shaders',
+        'clr',
+        '',
+      ]);
+    } catch (e) {
+      debugPrint('mpv: clearing glsl-shaders failed: $e');
+    }
+  }
+
+  /// Installs the hdr-toys shader chain for [mode].
+  ///
+  /// The chain is cleared first and the new list is read back: a shader that
+  /// fails to compile leaves the picture black, and the read-back is what
+  /// turns that into an error message instead of a silent black screen.
+  Future<bool> _applyMpvHdrToysShaders(
+    NativePlayer platform,
+    ToneMapMode mode,
+  ) async {
+    final profile = switch (mode) {
+      ToneMapMode.pq => HdrToysProfile.pq,
+      ToneMapMode.hlg => HdrToysProfile.hlg,
+      ToneMapMode.bt2020 => HdrToysProfile.bt2020,
+      _ => null,
+    };
+    if (profile == null) return false;
+    try {
+      final paths = await HdrToysShaderStore.pathsFor(profile);
+      final shaderList = paths.join(':');
+      await _clearMpvGlslShaders(platform);
+      await platform.command([
+        'change-list',
+        'glsl-shaders',
+        'set',
+        shaderList,
+      ]);
+      var applied = await platform.getProperty('glsl-shaders');
+      if (!applied.contains(paths.last)) {
+        await platform.setProperty('glsl-shaders', shaderList);
+        applied = await platform.getProperty('glsl-shaders');
+      }
+      if (!applied.contains(paths.last)) {
+        debugPrint('mpv: hdr-toys shader list was rejected');
+        return false;
+      }
+      debugPrint(
+        'mpv: hdr-toys applied profile=${profile.value} shader=${paths.last}',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('mpv: hdr-toys shader setup failed: $e');
+      return false;
+    }
+  }
+
+  /// A one-line explanation of why the requested HDR mode could not be used.
+  void _setMpvHdrModeNotice(String message) {
+    debugPrint('mpv: HDR mode notice — $message');
+    if (!mounted) return;
+    setState(() => _mpvHdrModeNotice = message);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 5),
+      ),
     );
   }
 
@@ -2154,15 +2308,13 @@ Future<void> _offerVc1Mpv() async {
         await platform.setProperty('hwdec', 'mediacodec-copy');
         _mpvAnime4kHwdecCopy = true;
       }
+      // Clear the chain BEFORE switching the video output: the legacy GL
+      // renderer cannot compile the libplacebo-syntax hdr-toys shaders, and
+      // a shader that fails to compile means a black picture.
+      await _clearMpvGlslShaders(platform);
       await platform.setProperty('vo', 'gpu');
       await platform.setProperty('gpu-api', 'opengl');
       await platform.setProperty('profile', 'gpu-hq');
-      await platform.command([
-        'change-list',
-        'glsl-shaders',
-        'clr',
-        '',
-      ]);
       await platform.command([
         'change-list',
         'glsl-shaders',
@@ -2182,14 +2334,7 @@ Future<void> _offerVc1Mpv() async {
         'shader=${paths.last}',
       );
     } else {
-      try {
-        await platform.command([
-          'change-list',
-          'glsl-shaders',
-          'clr',
-          '',
-        ]);
-      } catch (_) {}
+      await _clearMpvGlslShaders(platform);
       try {
         await platform.setProperty('gpu-api', 'auto');
       } catch (_) {}
@@ -2209,14 +2354,7 @@ Future<void> _offerVc1Mpv() async {
   Future<void> _clearMpvAnime4kForOpen(Player player) async {
     final platform = player.platform;
     if (platform is! NativePlayer) return;
-    try {
-      await platform.command([
-        'change-list',
-        'glsl-shaders',
-        'clr',
-        '',
-      ]);
-    } catch (_) {}
+    await _clearMpvGlslShaders(platform);
     try {
       await platform.setProperty('gpu-api', 'auto');
     } catch (_) {}
@@ -5914,8 +6052,6 @@ if (mounted) setState(_applySwipeValue);
     bool expandChapters = false;
     bool expandSubtitleDelay = false;
     bool expandDecoder = false;
-    bool expandToneMap = false;
-    bool expandInterpolation = false;
     bool expandBass = false;
     await showModalBottomSheet<void>(
       context: context,
@@ -6368,131 +6504,6 @@ if (mounted) setState(_applySwipeValue);
                               padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                               child: Text(AppLocalizations.of(context).playerDecoderReopen, style: TextStyle(color: Colors.white38, fontSize: 11)),
                             ),
-                          ],
-                        ),
-                      ),
-                    const Divider(color: Colors.white12, height: 1),
-                  ],
-                  // HDR/DV presentation for the libmpv engine only — Media3
-                  // already does native HDR/DV via SurfaceView passthrough.
-                  if (defaultTargetPlatform == TargetPlatform.android &&
-                      _mpvReady) ...[
-                    _tvListTile(
-                      leading: const Icon(Icons.palette_outlined, color: Colors.white70),
-                      title: Text(AppLocalizations.of(context).settingsToneMapMode, style: TextStyle(color: Colors.white)),
-                      subtitle: Text(_toneMapMode.label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                      trailing: Icon(expandToneMap ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
-                      onTap: () => setSheet(() => expandToneMap = !expandToneMap),
-                    ),
-                    if (expandToneMap)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: Column(
-                          children: [
-                            for (final m in ToneMapMode.values)
-                              _tvListTile(
-                                leading: Icon(
-                                  _toneMapMode == m ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: _toneMapMode == m ? Colors.white : Colors.white54,
-                                ),
-                                title: Text(m.label, style: const TextStyle(color: Colors.white)),
-                                subtitle: Text(
-                                  switch (m) {
-                                    ToneMapMode.sdr => AppLocalizations.of(context).settingsToneMapSdrDesc,
-                                    ToneMapMode.native => AppLocalizations.of(context).settingsToneMapNativeDesc,
-                                    ToneMapMode.linear => AppLocalizations.of(context).settingsToneMapLinearDesc,
-                                  },
-                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                                ),
-                                onTap: () async {
-                                  if (m == _toneMapMode) return;
-                                  setState(() => _toneMapMode = m);
-                                  setSheet(() {});
-                                  await ToneMapStore.save(m);
-                                  final player = _mpvPlayer;
-                                  if (player != null) {
-                                    await _applyMpvToneMap(player);
-                                  }
-                                  if (sheetContext.mounted) Navigator.of(sheetContext).pop();
-                                },
-                              ),
-                          ],
-                        ),
-                      ),
-                    const Divider(color: Colors.white12, height: 1),
-                    // Frame interpolation (issue #53) — libmpv only. Media3
-                    // renders decoded frames straight into the SurfaceView, so
-                    // there is no renderer that could produce the extra frames.
-                    _tvListTile(
-                      leading: const Icon(Icons.auto_awesome_motion, color: Colors.white70),
-                      title: Text(AppLocalizations.of(context).settingsMpvInterpolation, style: TextStyle(color: Colors.white)),
-                      subtitle: Text(
-                        _mpvInterpolation.enabled
-                            ? '${AppLocalizations.of(context).settingsMpvInterpolationFps(_mpvInterpolation.targetFps)} · ${switch (_mpvInterpolation.filter) {
-                                MpvInterpolationFilter.oversample => AppLocalizations.of(context).settingsMpvInterpolationQualitySharp,
-                                MpvInterpolationFilter.linear => AppLocalizations.of(context).settingsMpvInterpolationQualityBalanced,
-                                MpvInterpolationFilter.bicubic => AppLocalizations.of(context).settingsMpvInterpolationQualitySmooth,
-                              }}'
-                            : AppLocalizations.of(context).settingsMpvInterpolationOff,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
-                      ),
-                      trailing: Icon(expandInterpolation ? Icons.expand_less : Icons.expand_more, color: Colors.white54),
-                      onTap: () => setSheet(() => expandInterpolation = !expandInterpolation),
-                    ),
-                    if (expandInterpolation)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: Column(
-                          children: [
-                            for (final fps in MpvInterpolationStore.targetFpsChoices)
-                              _tvListTile(
-                                leading: Icon(
-                                  _mpvInterpolation.targetFps == fps ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: _mpvInterpolation.targetFps == fps ? Colors.white : Colors.white54,
-                                ),
-                                title: Text(
-                                  fps <= 0
-                                      ? AppLocalizations.of(context).settingsMpvInterpolationOff
-                                      : AppLocalizations.of(context).settingsMpvInterpolationFps(fps),
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                                onTap: () async {
-                                  if (_mpvInterpolation.targetFps == fps) return;
-                                  setState(() => _mpvInterpolation = _mpvInterpolation.copyWith(targetFps: fps));
-                                  setSheet(() {});
-                                  await MpvInterpolationStore.save(_mpvInterpolation);
-                                  final player = _mpvPlayer;
-                                  if (player != null) {
-                                    await _applyMpvInterpolation(player);
-                                  }
-                                },
-                              ),
-                            const Divider(color: Colors.white12, height: 1),
-                            for (final filter in MpvInterpolationFilter.values)
-                              _tvListTile(
-                                leading: Icon(
-                                  _mpvInterpolation.filter == filter ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: _mpvInterpolation.filter == filter ? Colors.white : Colors.white54,
-                                ),
-                                title: Text(
-                                  switch (filter) {
-                                    MpvInterpolationFilter.oversample => AppLocalizations.of(context).settingsMpvInterpolationQualitySharp,
-                                    MpvInterpolationFilter.linear => AppLocalizations.of(context).settingsMpvInterpolationQualityBalanced,
-                                    MpvInterpolationFilter.bicubic => AppLocalizations.of(context).settingsMpvInterpolationQualitySmooth,
-                                  },
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                                onTap: () async {
-                                  if (_mpvInterpolation.filter == filter) return;
-                                  setState(() => _mpvInterpolation = _mpvInterpolation.copyWith(filter: filter));
-                                  setSheet(() {});
-                                  await MpvInterpolationStore.save(_mpvInterpolation);
-                                  final player = _mpvPlayer;
-                                  if (player != null) {
-                                    await _applyMpvInterpolation(player);
-                                  }
-                                },
-                              ),
                           ],
                         ),
                       ),
@@ -8259,9 +8270,15 @@ if (mounted) setState(_applySwipeValue);
                           anime4kAvailable: _mpvAnime4kEligible,
                           anime4kApplying: _mpvAnime4kApplying,
                           anime4kStatus: _mpvAnime4kStatus,
+                          toneMapMode: _toneMapMode,
+                          toneMapNotice: _mpvHdrModeNotice,
+                          gpuNextAvailable: _mpvGpuNext == true,
+                          interpolation: _mpvInterpolation,
                           onChanged: _updateMpvPicture,
                           onAnime4kChanged: _setMpvAnime4kEnabled,
                           onAnime4kModeChanged: _setMpvAnime4kMode,
+                          onToneMapModeChanged: _setMpvToneMapMode,
+                          onInterpolationChanged: _setMpvInterpolationConfig,
                           onReset: _resetMpvPictureControls,
                           onClose: _closeMpvPictureControls,
                         ),
@@ -8290,9 +8307,15 @@ class _MpvPictureControls extends StatelessWidget {
     required this.anime4kAvailable,
     required this.anime4kApplying,
     required this.anime4kStatus,
+    required this.toneMapMode,
+    required this.toneMapNotice,
+    required this.gpuNextAvailable,
+    required this.interpolation,
     required this.onChanged,
     required this.onAnime4kChanged,
     required this.onAnime4kModeChanged,
+    required this.onToneMapModeChanged,
+    required this.onInterpolationChanged,
     required this.onReset,
     required this.onClose,
   });
@@ -8306,9 +8329,16 @@ class _MpvPictureControls extends StatelessWidget {
   final bool anime4kAvailable;
   final bool anime4kApplying;
   final String anime4kStatus;
+  final ToneMapMode toneMapMode;
+  final String? toneMapNotice;
+  final bool gpuNextAvailable;
+  final MpvInterpolationConfig interpolation;
   final void Function(String property, double value) onChanged;
   final Future<void> Function(bool enabled) onAnime4kChanged;
   final Future<void> Function(Anime4kMode mode) onAnime4kModeChanged;
+  final Future<void> Function(ToneMapMode mode) onToneMapModeChanged;
+  final Future<void> Function({int? targetFps, MpvInterpolationFilter? filter})
+      onInterpolationChanged;
   final Future<void> Function() onReset;
   final VoidCallback onClose;
 
@@ -8353,6 +8383,164 @@ class _MpvPictureControls extends StatelessWidget {
               _buildSlider('contrast', 'Contrast', contrast),
               _buildSlider('saturation', 'Saturation', saturation),
                _buildSlider('gamma', 'Gamma', gamma),
+               // HDR presentation mode — the same list the overflow sheet
+               // offers, next to Anime4K because the two shader chains are
+               // mutually exclusive (one `glsl-shaders` list, two dialects).
+               Row(
+                 crossAxisAlignment: CrossAxisAlignment.center,
+                 children: [
+                   const Expanded(
+                     child: Text(
+                       'HDR output',
+                       style: TextStyle(color: Colors.white70, fontSize: 13),
+                     ),
+                   ),
+                   Expanded(
+                     flex: 2,
+                     child: DropdownButton<ToneMapMode>(
+                       value: toneMapMode,
+                       isExpanded: true,
+                       underline: const SizedBox.shrink(),
+                       items: [
+                         for (final mode in ToneMapMode.values)
+                           DropdownMenuItem(
+                             value: mode,
+                             enabled: !mode.usesHdrToysShaders ||
+                                 gpuNextAvailable,
+                             child: Text(
+                               mode.label,
+                               overflow: TextOverflow.ellipsis,
+                             ),
+                           ),
+                       ],
+                       onChanged: anime4kEnabled
+                           ? null
+                           : (mode) {
+                               if (mode != null) {
+                                 unawaited(onToneMapModeChanged(mode));
+                               }
+                             },
+                     ),
+                   ),
+                 ],
+               ),
+               // Frame interpolation (issue #53) — libmpv only. Media3 hands
+               // decoded frames straight to the SurfaceView, so there is no
+               // renderer in which an extra frame could be produced.
+               Row(
+                 crossAxisAlignment: CrossAxisAlignment.center,
+                 children: [
+                   const Expanded(
+                     child: Text(
+                       'Frame rate',
+                       style: TextStyle(color: Colors.white70, fontSize: 13),
+                     ),
+                   ),
+                   Expanded(
+                     flex: 2,
+                     child: DropdownButton<int>(
+                       value: interpolation.targetFps,
+                       isExpanded: true,
+                       underline: const SizedBox.shrink(),
+                       items: [
+                         for (final fps in MpvInterpolationStore.targetFpsChoices)
+                           DropdownMenuItem(
+                             value: fps,
+                             child: Text(
+                               fps <= 0
+                                   ? AppLocalizations.of(context)
+                                       .settingsMpvInterpolationOff
+                                   : AppLocalizations.of(context)
+                                       .settingsMpvInterpolationFps(fps),
+                               overflow: TextOverflow.ellipsis,
+                             ),
+                           ),
+                       ],
+                       onChanged: (fps) {
+                         if (fps != null) {
+                           unawaited(onInterpolationChanged(targetFps: fps));
+                         }
+                       },
+                     ),
+                   ),
+                 ],
+               ),
+               Row(
+                 crossAxisAlignment: CrossAxisAlignment.center,
+                 children: [
+                   const Expanded(
+                     child: Text(
+                       'Interpolation quality',
+                       style: TextStyle(color: Colors.white70, fontSize: 13),
+                     ),
+                   ),
+                   Expanded(
+                     flex: 2,
+                     child: DropdownButton<MpvInterpolationFilter>(
+                       value: interpolation.filter,
+                       isExpanded: true,
+                       underline: const SizedBox.shrink(),
+                       items: [
+                         for (final filter in MpvInterpolationFilter.values)
+                           DropdownMenuItem(
+                             value: filter,
+                             child: Text(
+                               switch (filter) {
+                                 MpvInterpolationFilter.oversample =>
+                                   AppLocalizations.of(context)
+                                       .settingsMpvInterpolationQualitySharp,
+                                 MpvInterpolationFilter.linear => AppLocalizations
+                                     .of(context)
+                                     .settingsMpvInterpolationQualityBalanced,
+                                 MpvInterpolationFilter.bicubic =>
+                                   AppLocalizations.of(context)
+                                       .settingsMpvInterpolationQualitySmooth,
+                               },
+                               overflow: TextOverflow.ellipsis,
+                             ),
+                           ),
+                       ],
+                       onChanged: (filter) {
+                         if (filter != null) {
+                           unawaited(onInterpolationChanged(filter: filter));
+                         }
+                       },
+                     ),
+                   ),
+                 ],
+               ),
+               if (toneMapNotice != null)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 4),
+                   child: Row(
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       const Icon(
+                         Icons.warning_amber_rounded,
+                         color: Colors.orangeAccent,
+                         size: 16,
+                       ),
+                       SizedBox(width: 6),
+                       Expanded(
+                         child: Text(
+                           toneMapNotice!,
+                           style: const TextStyle(
+                             color: Colors.orangeAccent,
+                             fontSize: 11,
+                           ),
+                         ),
+                       ),
+                     ],
+                   ),
+                 ),
+               if (anime4kEnabled)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 4),
+                   child: Text(
+                     'Anime4K owns the renderer — turn it off to change the HDR output.',
+                     style: TextStyle(color: Colors.white38, fontSize: 11),
+                   ),
+                 ),
                SwitchListTile.adaptive(
                  contentPadding: EdgeInsets.zero,
                  dense: true,
