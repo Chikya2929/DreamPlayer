@@ -63,7 +63,9 @@ import '../utils/file_info_extractor.dart';
 import '../utils/tv_helper.dart';
 import '../utils/thermal_policy.dart';
 import '../services/thermal_monitor.dart';
+import '../services/cast_manager.dart';
 import '../widgets/airplay_button.dart';
+import '../widgets/cast_button.dart';
 import '../widgets/format_chip.dart';
 import '../widgets/gesture_warning_pill.dart';
 import 'player_error.dart';
@@ -550,6 +552,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     // TMDB title for the top bar — resolve on open (cache hit when the home
     // screen pre-fetched) and refresh live when metadata arrives.
     TmdService.instance.addListener(_onTmdbChanged);
+    // Google Cast: session state arrives through the manager; a session
+    // start hands playback over to the receiver (selected in the route
+    // picker). The button itself lives in the top bar (CastButton).
+    CastManager.instance.ensureListening();
+    CastManager.instance.addListener(_onCastSessionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncOrientationFromPlatform();
     });
@@ -565,6 +572,63 @@ class _PlayerScreenState extends State<PlayerScreen>
       setState(() => _tmdbMeta = fresh);
       _pushNowPlayingMetadata();
     }
+  }
+
+  void _onCastSessionChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (CastManager.instance.connected) {
+      unawaited(_onCastSessionStarted());
+    }
+  }
+
+  /// A Cast session went live: hand the current video over to the receiver.
+  ///
+  /// The receiver fetches the media itself, so only a direct http(s) URL is
+  /// castable in this skeleton — sources this device serves (files, SMB,
+  /// loopback proxies, headered URLs) keep playing locally and the session
+  /// is ended again right away; the LAN media server (Step 4b) is what will
+  /// make them castable.
+  Future<void> _onCastSessionStarted() async {
+    final video = _current;
+    final eligibility = castEligibility(video);
+    if (eligibility != CastEligibility.directPlayable) {
+      unawaited(CastManager.instance.stopCasting());
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(CastManager.instance.connected
+              ? 'This source cannot be cast yet'
+              : 'Cast ended'),
+        ),
+      );
+      return;
+    }
+    final positionMs = _livePositionMs;
+    // Hand playback over: pause the local engine, load on the receiver at
+    // the same position.
+    if (_engine == PlayEngine.mpv || _mpvActive) {
+      unawaited(_mpvPlayer?.pause());
+    } else {
+      unawaited(_exo?.pause());
+    }
+    final ok = await CastManager.instance.loadCurrent(
+      video,
+      positionMs: positionMs,
+      title: _displayTitle,
+    );
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      SnackBar(content: Text(ok ? 'Casting to ${CastManager.instance.deviceName ?? 'receiver'}' : 'Cast failed to start')),
+    );
+  }
+
+  int get _livePositionMs {
+    if (_engine == PlayEngine.mpv || _mpvActive) {
+      return _mpvPlayer?.state.position.inMilliseconds ?? 0;
+    }
+    return _exo?.latest?.positionMs ?? 0;
   }
 
   /// Mirrors the resolved metadata into the Now Playing card / media
@@ -4299,6 +4363,7 @@ Future<void> _offerVc1Mpv() async {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     TmdService.instance.removeListener(_onTmdbChanged);
+    CastManager.instance.removeListener(_onCastSessionChanged);
     _hideTimer?.cancel();
     _sleepTicker?.cancel();
     _swipeOverlayTimer?.cancel();
@@ -8026,6 +8091,8 @@ if (mounted) setState(_applySwipeValue);
                                const AirPlayButton(),
                                const SizedBox(width: 4),
                              ],
+                             const CastButton(),
+                             const SizedBox(width: 4),
                              _TvControlButton(
                                  onPressed: _openVideoInfoSheet,
                                  icon: const Icon(Icons.info_outline),

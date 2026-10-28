@@ -183,6 +183,7 @@ Each thumbnail is linked — click any image to open it full size.
 - **Swipe gestures** — swipe left side for brightness, right side for system volume (phones/tablets, togglable in Settings)
 - Aspect ratio picker: Fit, Crop, Stretch, 16:9, 4:3 (persists per video)
 - **Chapters** — MKV chapter ticks in the overflow menu, current chapter highlighted, tap to seek
+- **Cast to Chromecast (Android)** — the player's top bar hosts the system Cast route picker: genuine Chromecast / Google-TV receivers on the same Wi-Fi appear, picking one loads the current video on the TV at your position (local playback pauses). TVs without a Cast receiver (e.g. Hisense on VIDAA, which pairs with YouTube directly via DIAL instead) honestly stay absent
 - **Playback speed** 0.25×–2× with refresh-rate matching on Android
 - **Frame interpolation (MPV, Android)** — Settings → Player → *Frame interpolation* picks a target rate (30 / 48 / 60 / 120 fps) and a quality (Sharp / Balanced / Smooth), so a 24 fps film plays at 60 fps with blended in-between frames and pans stop looking choppy. It is MPV-only by design: Media3 has no interpolation API, and producing the extra frames on the native engine would mean routing the decoder through our own GPU renderer — which would cost the Dolby Vision / HDR passthrough the native engine exists for. Apply it live from the player's ⋮ sheet, or set it once in Settings
 - **Pinch-to-zoom**, horizontal-swipe seek, double-tap-to-seek ±10 s

@@ -2538,20 +2538,54 @@ the viewer. The user's own choice stays the ceiling.
 mild / hot / critical) forces a tier so the downgrade path can be verified on
 a phone that is not actually hot. The release workflow passes no such define.
 
-**Step 4 — Google Cast on Android.**
-`play-services-cast-framework` + a `MediaRouteButton` in the player chrome.
-Model it on their **engine-agnostic snapshot** (one snapshot object for both
-Media3 and MPV → one `resolveContentUrl` → one `RemoteMediaClient.load`), but
-implement it ourselves. Two decisions we must make explicitly:
-(a) **what is castable** — local `content://`/`file://` + `http(s)` URLs; and
-(b) **whether network sources are exposed over the LAN**. The second is our
-differentiator: rebinding `SmbHttpProxy` from `127.0.0.1` to `0.0.0.0` and
-handing the phone's LAN URL to the receiver makes SMB/WebDAV/FTP castable,
-which Mpv∞ cannot do (they reject every loopback source). LAN exposure is a
-security decision, so it ships behind a setting, off by default. The receiver
-decodes, so mpv-only formats will not cast — the UI must say so instead of
-failing silently. Local playback pauses on cast and is **restored at the
-receiver's last position** when the session ends.
+**Step 4 — Google Cast on Android. BUILT (2026-10-28, rebuilt from scratch per
+official docs after the first attempt was reverted by the user; commits
+`6c8959b` + the rebuild).** `play-services-cast-framework` 22.3.1 + the system
+`MediaRouteButton` in the player top bar (a `CastButtonView` platform view,
+`dreamplayer/cast`, next to the AirPlay block). `CastManager.kt` /
+`CastOptionsProvider.kt` (receiver `CC1AD845`), Dart
+`lib/services/cast_manager.dart` + `lib/widgets/cast_button.dart`, channels
+`dreamplayer/cast` / `dreamcast/cast_events`. Engine-agnostic snapshot
+(one snapshot for Media3 and MPV → `resolveContentUrl` → `RemoteMediaClient.load`),
+as planned above. Verify before merging: on-device — Media3 local 4K/DV still composites `BT2020_ITU_PQ` (dumpsys), Media3 local play/seek **without stutter/regression**, mpv local play/seek **without stutter**.
+
+TRAPS, each cost a build — do not re-learn:
+
+1. **THE PICKER ITSELF COLLAPSES THE ACTIVITY UNLESS THE ACTIVITY IS APPCOMPAT
+   AND THE THEME IS APPCOMPAT.** Two independent crashes, both presenting as
+   "app dies when I tap the Cast button": (a) `MediaRouteButton.showDialogForType`
+   requires an `AppCompat` activity — the Flutter `MainActivity` is NOT one, so
+   the button's dialog needs its OWN overlay path: `mediaRouteTheme` in
+   `values/styles.xml` + `values-night/styles.xml` (`Theme.MediaRouter`
+   theme) + AppCompat `NormalTheme` parents (Flutter's stock
+   `LaunchTheme`/`NormalTheme` are `android:Theme.Material.Light` which lacks
+   AppCompat).
+2. **A cast-destination "No devices available" is usually NETWORK WORKING.**
+   The picker with genuinely zero cast devices on the LAN is expected and
+   verified: a unicast mDNS sweep of the entire subnet confirmed no
+   `_googlecast._tcp` receivers whatsoever. Hisense VIDAA TVs have
+   NO built-in Chromecast; they pair with YouTube directly via DIAL
+   (`192.168.x`-local pairing), which NEVER surfaces in the Cast SDK's picker.
+   Never chase "YouTube finds it, we don't" — that's the DIAL path, not cast.
+3. **mDNS on the device is misleading when you misidentify the host.**
+   The phone itself answers `_googlecast._tcp` (uid 11253 `app.revanced.android.gms`
+   forge + real GMS), so phone-local mDNS packets are NOT TV presence. Always
+   check `adb shell ip neigh` (real ARP MACs) and `adb shell dumpsys
+   servicediscovery` (real NsdManager listener → true response count) before
+   concluding anything about network reach.
+4. **Sanity check the probe script before trusting its negatives** — an
+   mDNS detector printing nothing often means the detector never joined
+   multicast, not that nothing answered. Relay over `iperf`-blackhole or
+   raw `tcpdump` (as later steps did) for reference.
+5. `mediaRouteTheme` is REQUIRED for the dialog when the app switches themes
+   per-process — a missing one re-crashes in
+   `calculateContrast(translucent: #0)` on the picker path, indistinguishably
+   from trap 1a.
+
+what remains: verify a real session with an actual Chromecast/Google-TV receiver,
+which this network had zero of at commit time; and the "cast an SMB source"
+step requires the LAN binder (0.0.0.0 bind + setting) noted ABOVE.
+
 
 **Step 5 — Real (motion-compensated) interpolation without patching mpv.**
 Spike: FFmpeg `minterpolate` through mpv's `vf=lavfi`

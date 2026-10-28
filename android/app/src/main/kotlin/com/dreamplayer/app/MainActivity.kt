@@ -11,12 +11,16 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+/// FlutterFragmentActivity (not FlutterActivity) because androidx.mediarouter's
+/// MediaRouteButton opens the cast route picker through a DialogFragment, which
+/// requires a FragmentActivity host: plain FlutterActivity crashes with
+/// "The activity must be a subclass of FragmentActivity" on the first tap.
+class MainActivity : FlutterFragmentActivity() {
 
     private var intentChannel: MethodChannel? = null
     private var systemChannel: MethodChannel? = null
@@ -89,6 +93,12 @@ class MainActivity : FlutterActivity() {
             "dreamplayer/mpv_player",
             MpvSurfaceViewFactory(this, flutterEngine.dartExecutor.binaryMessenger),
         )
+        // Google Cast route picker button (MediaRouteButton in a platform view).
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "dreamplayer/cast_button",
+            CastButtonViewFactory(this, flutterEngine.dartExecutor.binaryMessenger),
+        )
+        CastManager(this).attach(flutterEngine.dartExecutor.binaryMessenger)
         fileBrowser = FileBrowser(this)
         fileBrowser!!.configure(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FileBrowser.CHANNEL),
