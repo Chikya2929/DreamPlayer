@@ -28,11 +28,13 @@ A cross-platform video player for **Android, iOS/iPad, and Android TV** — buil
 
 **[Download DreamPlayer on the App Store →](https://apps.apple.com/in/app/dreamplayer-video-player/id6813066889)**
 
-- Free, no ads, no account required
+- No ads, no account required
+- **7-day free trial**, then an optional Premium subscription (monthly, yearly, or a one-time lifetime purchase) — the trial is opt-in from the welcome screen, never automatic
+- Premium unlocks **Dolby Vision / HDR playback, subtitle styling, playback speed, A-B repeat, the sleep timer, downloads to device and OpenSubtitles search**. Browsing every source, playback itself, subtitle *viewing*, chapters, picture-in-picture, background audio and resume stay free
 - Requires **iOS / iPadOS 17.0** or later
 - Play your own files: local storage, Files-app folders, **in-app SMB/NAS on iPhone and iPad**, WebDAV, FTP/SFTP, Jellyfin, DLNA, and "Open with" hand-offs from other apps
 - Full Dolby Vision (P7/P8/P9) / HDR10 / HDR10+ / HLG support on capable iPad and iPhone panels, plus lossless audio (DTS-HD, TrueHD, E-AC3, FLAC) — DV Profile 4 is Android-only
-- Android builds remain free on the [Releases](https://github.com/mangeshghodke/DreamPlayer/releases) page
+- Android builds remain **completely free** — every feature, no paywall — and are on the [Releases](https://github.com/mangeshghodke/DreamPlayer/releases) page
 
 ## 📸 Screenshots
 
@@ -97,6 +99,7 @@ Each thumbnail is linked — click any image to open it full size.
 - Plays **Dolby Vision** Profiles **P7 / P8 / P9** at 4K 60fps with zero dropped frames — chip shows `DV P8`, `DV P7`, etc.
 - **Profile 4** (single-layer IPTPQc2, a broadcast/IPTV profile) plays on **Android** only. iOS has no P4 decoder and no backward-compatible base layer to fall back to, so it reports a clear "not supported" message instead of failing silently.
 - Full **HDR10 / HDR10+ / HLG** passthrough to the display panel
+- **Hardware SDR tone-mapping (Android, opt-in)** — Settings → Player → *Hardware SDR tone-mapping* asks the decoder to output standard SDR instead of the source's HDR/Dolby-Vision signal, so the phone's own hardware tone-mapper converts on the chip. The system colour modes (Vivid/Natural, white balance) apply to the picture again, and **Dolby Vision Profile 5 stops rendering green/purple**. It costs no CPU and 4K60 stays smooth. The trade-off is deliberate — the picture leaves the HDR path, so the panel no longer receives real Dolby Vision or HDR10 — which is why it is off by default. When the codec confirms the conversion, the chip reads **"Tone-mapped SDR"** instead of claiming Dolby Vision
 - Live on-screen chips showing the active HDR format (profile-aware), video codec, audio codec, and resolution
 - Graceful fallback on non-DV devices (P7/P8 as HDR10, P4/P5 show a clean error)
 
@@ -165,9 +168,12 @@ Each thumbnail is linked — click any image to open it full size.
 - **Multi-select delete** — long-press files or folders to select, then ⋮ → Delete. Folders are deleted recursively, with the confirmation spelling that out
 
 ### Localization
-- **English, Spanish, Chinese Simplified, Russian** — 504 translated strings across all 13 screens
+- **English, Spanish, Chinese Simplified, Russian** — 549 translated strings across all 13 screens
 - **Auto-detect** device language on launch; optional **Settings → General → Language** override
 - Technical terms (codec names, HDR, Dolby Vision, etc.) stay English by design
+
+### Appearance
+- **Alternate app icons** — Settings → Appearance → *App icon* switches between five launcher icons (default, logo-only, red, green, cyan). Android switches the launcher component itself; iOS uses the system alternate-icon API
 
 ### Movie Metadata (TMDB)
 - Every video opens a **details screen** with poster, backdrop, synopsis, rating, genres, runtime, and cast
@@ -182,17 +188,20 @@ Each thumbnail is linked — click any image to open it full size.
 - Play/pause, seek, ±10s, fullscreen, auto-hiding UI
 - **Swipe gestures** — swipe left side for brightness, right side for system volume (phones/tablets, togglable in Settings)
 - Aspect ratio picker: Fit, Crop, Stretch, 16:9, 4:3 (persists per video)
-- **Chapters** — MKV chapter ticks in the overflow menu, current chapter highlighted, tap to seek
-- **Cast to Chromecast (Android)** — the player's top bar hosts the system Cast route picker: genuine Chromecast / Google-TV receivers on the same Wi-Fi appear, picking one loads the current video on the TV at your position (local playback pauses). TVs without a Cast receiver (e.g. Hisense on VIDAA, which pairs with YouTube directly via DIAL instead) honestly stay absent
+- **Chapters** — previous/next chapter buttons beside the transport (press previous twice to walk back, not just restart the current one) and ticks on the seekbar, on both engines and on local, SMB, WebDAV, FTP, UPnP and Jellyfin sources
+- **Play on TV (Android)** — one sheet in the player's top bar for every way out to a big screen: **Google Cast** (the system route picker — genuine Chromecast / Google-TV receivers on the same Wi-Fi), **DLNA/UPnP TVs** (AVTransport play/pause/seek with the position polled back), and a **DreamPlayer receiver** (another DreamPlayer on the network, e.g. the Fire TV Stick, answers a broadcast and plays the file there). Local playback pauses while casting. TVs without a Cast receiver (e.g. Hisense on VIDAA, which pairs with YouTube directly via DIAL instead) honestly stay absent rather than showing an empty list
+- **AirPlay (iOS)** — the real system AirPlay picker is embedded in the player top bar; video goes out on the native AVPlayer path, while FFmpeg-backed containers (MKV/TS/AVI) can send audio only
+- **Keyboard shortcuts (non-TV)** — `K` / Space play-pause, `J` / `L` seek ∓10 s, `F` fullscreen; left/right seek while the controls are hidden
 - **Playback speed** 0.25×–2× with refresh-rate matching on Android
-- **Frame interpolation (MPV, Android)** — Settings → Player → *Frame interpolation* picks a target rate (30 / 48 / 60 / 120 fps) and a quality (Sharp / Balanced / Smooth), so a 24 fps film plays at 60 fps with blended in-between frames and pans stop looking choppy. It is MPV-only by design: Media3 has no interpolation API, and producing the extra frames on the native engine would mean routing the decoder through our own GPU renderer — which would cost the Dolby Vision / HDR passthrough the native engine exists for. Apply it live from the player's ⋮ sheet, or set it once in Settings
+- **Frame interpolation (MPV, Android)** — the picture panel (the sliders button at the top right) → *Frame interpolation* picks a target rate (30 / 48 / 60 / 120 fps) and a quality (Sharp / Balanced / Smooth), so a 24 fps film plays at 60 fps with blended in-between frames and pans stop looking choppy. It is MPV-only by design: Media3 has no interpolation API, and producing the extra frames on the native engine would mean routing the decoder through our own GPU renderer — which would cost the Dolby Vision / HDR passthrough the native engine exists for. Set a default in Settings → Player, or change it live from the picture panel. The target is also **capped automatically when the phone gets warm** (Android thermal headroom), and the same reading steps the Anime4K preset down — the quality never climbs back on its own, so the picture doesn't keep changing under you
+- **Thermal-aware quality (Android)** — while the MPV engine plays, DreamPlayer samples the device's thermal headroom every 10 s and eases the GPU-heavy features down before the phone throttles
 - **Pinch-to-zoom**, horizontal-swipe seek, double-tap-to-seek ±10 s
 - **Touch lock** — locks gestures during playback; tap once to reveal the unlock button
 - **Watched marks** — videos auto-mark as watched at the end; toggle manually per row
 - **Auto-play next episode** within the same folder — local/SMB + **Jellyfin via ParentId sibling walk** (togglable)
 - Resumes playback from where you left off, even after app close or screen lock
 - **Picture-in-Picture** — system-drawn transport controls (rewind, play-pause, forward) work for BOTH engines, including the libmpv engine
-- **Two play engines — your choice** — every video's details screen shows **Play** (Media3) and **Play with MPV** (libmpv, Android). mpv runs hardware-first (`hwdec=auto-safe`) with its own FFmpeg software fallback and decodes lossless codecs to PCM through Android `AudioTrack`; Media3 retains optional HDMI bitstream passthrough. Video renders into a **native SurfaceView** (not a Flutter texture). Media3 remains the DV/HDR engine; the MPV path can optionally **tone-map HDR → SDR** (Settings → Player → HDR tone-map) when a libplacebo-enabled libmpv is present.
+- **Two play engines — your choice** — every video's details screen shows **Play** (Media3) and **Play with MPV** (libmpv, Android). mpv runs hardware-first (`hwdec=auto-safe`) with its own FFmpeg software fallback and decodes lossless codecs to PCM through Android `AudioTrack`; Media3 retains optional HDMI bitstream passthrough. Video renders into a **native SurfaceView** (not a Flutter texture). Media3 remains the DV/HDR engine; the MPV path can optionally convert the picture (Settings → Player → *HDR tone-map*: SDR tone-map, Native HDR/DV, Linear HDR, HDR10 PQ, HLG, BT.2020 wide gamut) when a libplacebo-enabled libmpv is present.
 - **Anime4K for MPV (Android, opt-in)** — enable the Anime4K toggle in the MPV picture panel, then choose Mode A, B, C, A+A, B+B, or C+A. The selected preset takes effect immediately and an `Upscaled` chip is shown while active. It is limited to SDR MPV playback; HDR/DV and PiP are disabled. The bundled Anime4K v4.0.1 fast presets use legacy `vo=gpu` because they do not compile with `vo=gpu-next`/libplacebo, so libplacebo tone mapping is unavailable while enabled. The panel warns about extra GPU load, heat, battery use, and stutter.
 - **Optional TheTVDB metadata** — configure a TheTVDB v4 API key in Settings → Metadata. DreamPlayer keeps TMDB as the primary source, can use TheTVDB as a fallback, and lets you choose it explicitly in Fix Match/Group Poster. Provider IDs and artwork are cached independently; SIMKL matching remains TMDB-only.
 
@@ -223,8 +232,11 @@ Flutter `Texture` — textures stutter and have no HDR path. media_kit is kept
 for `Player` control only; `media_kit_video` is not a dependency. A
 libplacebo/`gpu-next`-enabled `libmpv.so` can be dropped under
 `android/app/src/main/jniLibs/` (Gradle `pickFirsts` overrides media_kit's
-stock binary) so **HDR tone-map → SDR** works for files you do not want in
-native HDR.
+stock binary) so the picture can be **converted** for files you do not want in
+native HDR: Settings → Player → *HDR tone-map* offers SDR tone-map, Native
+HDR/DV, Linear HDR, HDR10 (PQ), HLG and BT.2020 wide gamut, and the player
+always writes the complete property set so a mode switch can never leave stale
+primaries or transfer behind.
 
 **Anime4K (Android MPV only)** is exposed in the same in-player tune panel as
 Picture. Enable **Anime4K** first; the default Mode A chain is applied, then
