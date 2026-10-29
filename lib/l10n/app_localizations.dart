@@ -1254,6 +1254,18 @@ abstract class AppLocalizations {
   /// **'Takes effect on next video'**
   String get settingsDecoderReopen;
 
+  /// Hardware SDR tone-mapping toggle label
+  ///
+  /// In en, this message translates to:
+  /// **'Hardware SDR tone-mapping'**
+  String get settingsHwSdrToneMap;
+
+  /// Hardware SDR tone-mapping toggle subtitle
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the decoder to output standard SDR, so the system colour modes (Vivid/Natural, white balance) apply to the video again. The picture then leaves the HDR path — no real Dolby Vision or HDR10 on the panel. Needs Android 12+ and a device that supports it.'**
+  String get settingsHwSdrToneMapDesc;
+
   /// TMDB key input label
   ///
   /// In en, this message translates to:

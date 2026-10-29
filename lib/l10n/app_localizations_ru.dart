@@ -616,6 +616,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsDecoderReopen => 'Takes effect on next video';
 
   @override
+  String get settingsHwSdrToneMap => 'Hardware SDR tone-mapping';
+
+  @override
+  String get settingsHwSdrToneMapDesc =>
+      'Ask the decoder to output standard SDR, so the system colour modes (Vivid/Natural, white balance) apply to the video again. The picture then leaves the HDR path — no real Dolby Vision or HDR10 on the panel. Needs Android 12+ and a device that supports it.';
+
+  @override
   String get settingsTmdbKey => 'TMDB API key';
 
   @override

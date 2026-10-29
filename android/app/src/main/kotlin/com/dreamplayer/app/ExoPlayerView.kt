@@ -1331,6 +1331,11 @@ class ExoPlayerView(
                     dvRejectionShown = false
                     hdr10PlusContent = false
                     hdr10Content = false
+                    // Per-open state for the hardware SDR tone-map request
+                    // (issue #55): the next codec decides again whether it
+                    // gets the request, and the previous codec's output
+                    // transfer must not be reported for this file.
+                    HwSdrToneMap.reset()
                     chapters = emptyList()
                     currentVideoDecoderName = null
                     probesFired = true
@@ -2161,8 +2166,16 @@ class ExoPlayerView(
         val colorTransfer = videoFormat?.colorInfo?.colorTransfer
         val codecs = videoFormat?.codecs
         val isDolbyVision = codecs?.let { Regex("dv(?:he|h1|av)\\.").containsMatchIn(it) } == true
+        // Hardware SDR tone-mapping (issue #55): when the user asked the
+        // decoder to output standard SDR, the video layer is NOT an HDR layer
+        // any more — pushing the window into COLOR_MODE_HDR, asking for
+        // headroom or tagging the surface as BT2020_PQ would be wrong (the
+        // buffer is 709 now). Skip the whole HDR-window machinery and let the
+        // system colour modes apply to a normal SDR picture.
+        val hwSdrToneMap = HwSdrToneMap.isEnabled(activity) && HwSdrToneMap.requested
         applyHdrHeadroom(
             when {
+                hwSdrToneMap -> 1.0f
                 colorTransfer == C.COLOR_TRANSFER_ST2084 ||
                     colorTransfer == C.COLOR_TRANSFER_HLG -> 5.0f
                 isDolbyVision -> 5.0f
@@ -2170,7 +2183,7 @@ class ExoPlayerView(
                 else -> 1.0f
             },
             colorTransfer ?: -1,
-            skipWindowHdr = isDolbyVision,
+            skipWindowHdr = isDolbyVision || hwSdrToneMap,
         )
 
         // Override colorTransfer for the Dart chip when we detected HDR10 via
@@ -2193,6 +2206,12 @@ class ExoPlayerView(
         map["videoWidth"] = videoSize.width
         map["videoHeight"] = videoSize.height
         map["colorTransfer"] = emittedColorTransfer
+        // The transfer the codec ACTUALLY output (issue #55). Differs from
+        // `colorTransfer` (the container's declared value) when the decoder
+        // tone-mapped an HDR stream down to SDR. Null = the codec did not
+        // report one.
+        map["videoOutputTransfer"] = HwSdrToneMap.outputTransfer
+        map["hwSdrToneMap"] = hwSdrToneMap
         map["isHdr10Plus"] = hdr10PlusContent
         map["isHdr10"] = hdr10Content
         map["audioCodecs"] = audioFormat?.codecs

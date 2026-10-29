@@ -277,6 +277,8 @@ class ExoPlayerEvent {
     this.videoWidth = 0,
     this.videoHeight = 0,
     this.colorTransfer,
+    this.videoOutputTransfer,
+    this.hwSdrToneMap = false,
     this.isHdr10Plus = false,
     this.isHdr10 = false,
     this.audioCodecs,
@@ -316,6 +318,17 @@ class ExoPlayerEvent {
   final int videoWidth;
   final int videoHeight;
   final int? colorTransfer;
+
+  /// The transfer characteristic the codec ACTUALLY output (3 = SDR,
+  /// 6 = PQ, 7 = HLG). Differs from [colorTransfer] (the container's
+  /// declared value) when the decoder tone-mapped an HDR stream down to
+  /// SDR — the "hardware SDR tone-mapping" setting (issue #55). Null when
+  /// the codec did not report one.
+  final int? videoOutputTransfer;
+
+  /// True when the hardware SDR tone-map request was injected into the
+  /// current video codec (issue #55).
+  final bool hwSdrToneMap;
 
   /// True when the native side found ST 2094-40 (HDR10+) dynamic metadata in
   /// the video bitstream. Media3's format info can't tell HDR10+ from HDR10
@@ -413,6 +426,10 @@ class ExoPlayerEvent {
       colorTransfer: m['colorTransfer'] is num
           ? (m['colorTransfer'] as num).toInt()
           : null,
+      videoOutputTransfer: m['videoOutputTransfer'] is num
+          ? (m['videoOutputTransfer'] as num).toInt()
+          : null,
+      hwSdrToneMap: m['hwSdrToneMap'] == true,
       isHdr10Plus: m['isHdr10Plus'] == true,
       isHdr10: m['isHdr10'] == true,
       audioCodecs: m['audioCodecs'] as String?,

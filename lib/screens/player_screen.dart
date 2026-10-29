@@ -396,6 +396,24 @@ class _PlayerScreenState extends State<PlayerScreen>
   int _liveBass = 0;
   String? _liveResolution;
   HdrFormat _liveHdr = HdrFormat.sdr;
+
+  /// The transfer the native codec ACTUALLY output (3 = SDR, 6 = PQ). Set
+  /// when the "hardware SDR tone-mapping" setting made the decoder tone-map
+  /// an HDR stream down to SDR (issue #55). Null = unknown.
+  int? _liveOutputTransfer;
+
+  /// True when the hardware SDR tone-map request was injected into the
+  /// current codec (issue #55).
+  bool _liveHwSdrToneMap = false;
+
+  /// True when the decoder really produced standard SDR for an HDR source
+  /// (the request was made AND the codec confirmed an SDR output transfer).
+  bool get _toneMappedToSdr =>
+      !_mpvReady &&
+      _liveHwSdrToneMap &&
+      _liveOutputTransfer == 3 &&
+      _effectiveHdr != HdrFormat.sdr;
+
   String? _liveDecoderName;
   bool? _isHwDecoder;
   /// Source URI scheme, used to label the source in the ⓘ info sheet
@@ -3849,6 +3867,11 @@ Future<void> _offerVc1Mpv() async {
       isHdr10Plus: e.isHdr10Plus,
       isHdr10: e.isHdr10,
     );
+    // The codec's REAL output transfer (issue #55): when the decoder
+    // tone-mapped an HDR stream down to SDR the picture on screen is SDR,
+    // even though the container still says PQ/Dolby Vision.
+    _liveOutputTransfer = e.videoOutputTransfer;
+    _liveHwSdrToneMap = e.hwSdrToneMap;
     // Don't regress a known Dolby Vision / HDR state to SDR when the
     // native event arrives without codec/transfer (common on the first
     // events after a resume/reopen). Keep the last non-SDR live value
@@ -5306,7 +5329,12 @@ if (mounted) setState(_applySwipeValue);
       if (sourceUrl.isNotEmpty && sourceUrl != video.title)
         (label: AppLocalizations.of(context).playerUrl, value: sourceUrl),
       if (fileSize != null) (label: AppLocalizations.of(context).playerFileSize, value: fileSize),
-      (label: 'HDR', value: _mpvReady ? _mpvHdrChipLabel : _hdrLabel),
+      (
+        label: 'HDR',
+        value: _mpvReady
+            ? _mpvHdrChipLabel
+            : (_toneMappedToSdr ? 'Tone-mapped SDR · $_hdrLabel' : _hdrLabel),
+      ),
       if (_videoCodecInfoLabel != null)
         (label: 'Video', value: _videoCodecInfoLabel!),
       if (_resolutionInfoLabel != null)
@@ -7253,7 +7281,17 @@ if (mounted) setState(_applySwipeValue);
     return _effectiveHdr.label;
   }
 
+  /// HDR chip text for the on-screen badge. When the decoder tone-mapped an
+  /// HDR source down to SDR (the "hardware SDR tone-mapping" setting,
+  /// issue #55) the picture on screen is SDR — saying "Dolby Vision" there
+  /// would be a lie, so the chip says what is actually displayed.
+  String get _hdrChipLabel {
+    if (_toneMappedToSdr) return 'Tone-mapped SDR';
+    return _hdrLabel;
+  }
+
   Color get _hdrColor {
+    if (_toneMappedToSdr) return const Color(0xFF9E9E9E);
     switch (_effectiveHdr) {
       case HdrFormat.dolbyVision:
         return const Color(0xFFB388FF);
@@ -7386,7 +7424,7 @@ if (mounted) setState(_applySwipeValue);
         ? _dragValue
         : _position.inMilliseconds.toDouble().clamp(0, maxMs).toDouble();
 
-    final hdrChip = FormatChip(label: _hdrLabel, color: _hdrColor);
+    final hdrChip = FormatChip(label: _hdrChipLabel, color: _hdrColor);
     final audioChipLabel = _audioInfoLabel;
     final audioChip = audioChipLabel != null || _liveAudioPassthrough
         ? FormatChip(

@@ -7,6 +7,19 @@ pulled into the GitHub Release body automatically by `.github/workflows/release.
 
 ### Added
 
+- **Hardware SDR tone-mapping (issue #55).** Settings → Player now has a
+  "Hardware SDR tone-mapping" switch (Android, off by default). When it is on,
+  the video decoder is asked to output standard SDR instead of the source's
+  HDR/Dolby-Vision signal, so Qualcomm's hardware tone-mapper does the
+  conversion on the chip: the picture comes out as normal BT.709, the
+  system's own colour modes (OxygenOS Vivid/Natural, white balance) apply to
+  the video again, and Dolby Vision Profile 5 stops rendering green/purple.
+  It costs no CPU and playback stays smooth at 4K60.
+  The trade-off is deliberate, which is why it is off by default: the picture
+  leaves the HDR path, so the panel no longer receives real Dolby Vision or
+  HDR10. The on-screen badge says "Tone-mapped SDR" when the decoder confirms
+  the conversion, and the ⓘ info sheet names the source format next to it.
+
 - **The phone's temperature now decides how hard the picture effects work.**
   While the MPV engine is playing, DreamPlayer reads Android's thermal
   headroom and eases the GPU-heavy features down when the phone gets warm:

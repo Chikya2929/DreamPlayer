@@ -699,6 +699,77 @@ A video player app supporting:
   `android/app/src/main/jniLibs/` (Gradle `pickFirsts`). `_mpvGpuNextAvailable`
   probes `libplacebo-version`; stock libmpv no-ops to `vo=gpu` + bt.2390.
   Android-only; widget test: `test/settings_tone_map_platform_test.dart`.
+- **Hardware SDR tone-mapping (issue #55, 2026-10-29 — user request, verified
+  on-device)** — Settings → Player → "Hardware SDR tone-mapping" (Android,
+  **OFF by default**). When on, the video codec is asked to output standard
+  SDR instead of the source's HDR/Dolby-Vision signal, so Qualcomm's hardware
+  tone-mapper converts on the chip (`YUV_709_NARROW_GAMMA`): the system colour
+  modes (OxygenOS Vivid/Natural, white balance) apply again and **DV Profile 5
+  stops rendering green/purple**. The trade-off is deliberate — the picture
+  leaves the HDR path, so the panel no longer gets real Dolby Vision/HDR10 —
+  which is why it is opt-in and labelled as such.
+  - **Plumbing (verified against the shipped Media3 1.10.1, not assumed):**
+    `DreamRenderersFactory.getCodecAdapterFactory()` is `protected` and IS
+    called by `buildVideoRenderers` (bytecode: `invokevirtual
+    getCodecAdapterFactory` → `MediaCodecVideoRenderer$Builder
+    .setCodecAdapterFactory`), so overriding it works. `MediaCodecAdapter
+    .Configuration.mediaFormat` is the **same** `MediaFormat` instance that
+    reaches `MediaCodec.configure(...)` (`AsynchronousMediaCodecAdapter
+    $Factory.createAdapter` passes `Configuration.mediaFormat` straight
+    through) — so `setInteger(KEY_COLOR_TRANSFER_REQUEST,
+    COLOR_TRANSFER_SDR_VIDEO)` on it really reaches the decoder.
+    `MediaFormat.KEY_COLOR_TRANSFER_REQUEST` is **API 31+**
+    (`COLOR_TRANSFER_SDR_VIDEO` is API 24) → the request is gated on
+    `SDK_INT >= S`; on the API-25 Fire TV Stick it is a no-op.
+  - **The DV-without-Colour trap applies here too.** A DV MKV/MP4 without the
+    `Colour` element has **no `colorInfo` at all** (Media3's MatroskaExtractor
+    never reads the HEVC VUI), so a `ColorInfo.isTransferHdr` check alone
+    would skip exactly the files the feature is for. `HwSdrToneMap
+    .shouldRequest` therefore also matches `video/dolby-vision` and the
+    `dvhe|dvh1|dvav` codec prefix (pure function, unit-tested in
+    `android/app/src/test/.../HwSdrToneMapTest.kt`).
+  - **Window headroom must be suppressed with it.** When the decoder outputs
+    SDR the video layer is NOT an HDR layer, so `applyHdrHeadroom()` must skip
+    the `COLOR_MODE_HDR` + headroom + `setDataSpace(BT2020_PQ)` machinery —
+    the existing `skipWindowHdr = true` branch (the Dolby Vision one) already
+    resets the window to `COLOR_MODE_DEFAULT` / headroom 1.0 / dataspace 0,
+    so the toggle just ORs into it (`ExoPlayerView.stateMap`).
+  - **The label must be honest.** Media3 does NOT copy the codec's output
+    colour info back into `Format.colorInfo` (checked
+    `MediaCodecVideoRenderer.onOutputFormatChanged` — it only takes
+    size/rotation), so the chip would still claim "Dolby Vision" while the
+    picture is SDR. The adapter is therefore wrapped in Media3's public
+    `ForwardingMediaCodecAdapter` and the REAL output transfer is read from
+    `getOutputFormat()`; the Dart chip shows "Tone-mapped SDR" only when the
+    codec confirmed transfer 3, and the ⓘ sheet shows
+    "Tone-mapped SDR · <source format>".
+  - **Preference contract:** Dart `HwSdrToneMapStore` writes
+    `dreamplayer.hwSdrToneMap`; shared_preferences puts it in
+    `FlutterSharedPreferences` as `flutter.dreamplayer.hwSdrToneMap`, which the
+    native side reads **live** (same pattern as `PlayerCodecs.decoderMode`) —
+    the codec is created per open, so the change lands on the next video and
+    needs no player re-instantiation.
+  - **Verified on-device (OnePlus CPH2573, Snapdragon 8 Gen 3, Android 16):**
+    ON + `hdr10+test_lake_2021_02_01.mp4` → `hardware SDR tone-map requested
+    for video/hevc /hvc1.2.4.H153.90 (transfer=6)` + `codec output
+    transfer=3 (SDR (709))`, the video layer becomes `dataspace=V0_BT709`,
+    `hdr metadata types=0`, and `c2.qti.hevc.decoder` holds 4K60 with
+    `discardFps=0`. ON + `dolby-vision-people` (DV **Profile 5**) → Qualcomm
+    logs `SDR transcoding mode : dynamic!` + `dynamic sdr transcoding output
+    video type : YUV_709_NARROW_GAMMA`, the picture is correctly coloured
+    (no green/purple), and the chip reads "Tone-mapped SDR". OFF (same file) →
+    no request, no transcoding, the layer is back to `dataspace=BT2020_PQ`,
+    `hdr metadata types=8`, `forceClientComposition=false`,
+    `whitePointNits=458` — i.e. **native Dolby Vision passthrough is
+    untouched**.
+  - **Traps:** (a) the logcat ring buffer rolls in seconds on a 4K Dolby
+    Vision stream (`QC2V4l2Decoder` floods it) — capture to a file
+    (`adb logcat -v time > file`) BEFORE opening the file, otherwise the
+    evidence is gone; (b) a `file://` VIEW intent on an ALREADY-RUNNING app is
+    delivered to the top instance and does not always restart playback — open
+    a *different* file to force a fresh codec; (c) `DreamRenderersFactory`
+    logs are on the app process, so filter by the app pid, not by `-s`.
+
 - **Movie-part folders stay separate + per-part TMDB matches (2026-09, 0.4.7)**: movie-part folders like `[VCB-Studio] GIRLS und PANZER das FINALE 01 [Ma10p_1080p]` (Parts 1–4) previously collapsed into one auto-group AND all matched the same movie. Three fixes: (1) `SeriesGroupingService.baseNameOf` strips trailing numbers ONLY when a season-like tag (`S01`, `Season N`, roman numeral — `_conditionallyStripTrailingNumber`) is present, so `FINALE 01`–`04` keep their numbers → each gets its own card; (2) `resolveFolder` tries the **numbered** query first (base `FINALE` as fallback, `candidates.addAll` not `insertAll(0)`) and threads the folder's trailing number as `desiredPart` through `_resolveFolderCandidates` → `_resolveFolderNow` → `TmdApi.bestForQuery` → `_queryScore`/`_score` (the effective part is `qPart ?? desiredPart`, so even the base query gets the part boost); part match `+0.45`, mismatch `-0.35`, query-has-part-but-title-has-none `-0.25` — `FINALE 01→474659`, `02→496891`, `03→746880`, `04→1051192` each win their own `Part` entry (`_partNumberFromTitle` parses `Part 2` AND Roman `Part II`); (3) stale movie-part caches are detected (folder trailing `02` vs cached title `Part I`) and re-resolved in both `TmdService` and `home_screen._resolveFolderMetadata` — log-only, the stale poster stays visible until the fresh fetch lands (no flash).
 - **Manual grouping (2026-09, 0.4.7)**: the user selects 2+ cards on Home (long-press enters selection mode, tap toggles the whole group, ✕/back exits), then Group via the app-bar `library_add_check` button or the ⋮ menu → `_promptGroupNameDialog` asks for a name → one grouped card appears. `ManualGroup`/`ManualGroupsStore` (`lib/services/manual_groups.dart`, prefs `dreamplayer.manualGroups`); `_buildDisplayGroups(folders, manual)` renders manual groups FIRST (members collapsed into one `SeriesGroup`, remaining folders auto-group by name), prunes stale groups (folder removed / below 2 members → dissolved) and persists the pruning. `FolderCard.displayNameOverride` (the user-entered group name) wins over TMDB/folder titles on the card. Removing a folder from the library drops it from any manual group (`removeFolderId`). All manual groups open `MovieGroupScreen` (below); auto groups keep the `SeriesSeasonsScreen` flow.
 - **MovieGroupScreen (2026-09, 0.4.7)** (`lib/screens/movie_group_screen.dart`): the grouped-card detail screen, mirroring `SeriesSeasonsScreen`'s layout: backdrop hero `SliverAppBar` (clean backdrop when expanded, fades to toolbar title beside the back arrow when collapsed — same `_CollapsingBackdrop` pattern), `_Header` card (poster + title + year + expandable overview More/Less + star rating + genre chips), `_CastRow` (horizontal circular photos), `_TrailersRow` (up to 5 YouTube buttons), then the grouped folders as poster cards in a `SliverLayoutBuilder` grid using the SAME sizing as the home screen (`_columnsForWidth` 2/3/4/6, `itemWidth * 3/2 + 84`). Header shows only when a member has TMDB info (`_metaForDisplay()`: group key → any member's cached meta) — a random group with no metadata shows just the cards. Details load via `detailsFor` (group key → any member key with meta). Card taps: file entries (`isFile`) build a `VideoItem` from `videoPath`/`videoUri` + `extractFileInfo` and push `TmdDetailsScreen(video:, parentMetadataKey:)` (VIDEO mode — folder mode lists a directory, which a file entry doesn't have: "no videos here" + dead Play button); folder entries push `TmdDetailsScreen(folder:)`.
@@ -3458,6 +3529,7 @@ lib/
   services/default_engine_store.dart # dreamplayer.defaultEngine (Media3 / libmpv / ask)
   services/audio_track_store.dart # per-video+engine last audio pick (audio_track_{engine}_{resumeKey})
   services/tone_map_store.dart    # dreamplayer.toneMapMode (sdr|native) for MPV HDR tone-map
+  services/hw_sdr_tonemap_store.dart # dreamplayer.hwSdrToneMap — hardware SDR tone-mapping (issue #55)
   services/mpv_surface_view.dart  # MpvSurfaceView platform view (hybrid composition, no Flutter Texture)
   utils/mpv_audio_select.dart     # pickMpvDefaultAudioId + parseMpvDefaultFlag (container DEFAULT audio pin)
   config/tmdb_api_key.dart        # default TMDB key from --dart-define=TMDB_API_KEY (never committed)
@@ -3490,6 +3562,8 @@ lib/
     update_dialog.dart          # in-app update sheet: notes, download progress, unknown-sources prompt, install retry
 android/app/src/main/kotlin/com/dreamplayer/app/
   ExoPlayerView.kt              # native PlayerView platform view + channels (open/play/seek/tracks/subtitles) + OkHttp permissive DataSource for self-signed WebDAV
+  HwSdrToneMap.kt               # hardware SDR tone-mapping state + pure shouldRequest() decision (issue #55)
+  DreamRenderersFactory.kt      # DefaultRenderersFactory subclass: FFmpeg audio/video fallbacks + hardware SDR tone-map codec adapter
   SubtitleFormats.kt            # extension->MIME map, sibling auto-pairing, VobSub pair detection, bounded charset sniff, UTF-8 re-encode
   VobSubPayloadExtractor.kt      # MPEG-PS demux for sidecar .idx/.sub -> DVD subtitle packets (validated vs ffmpeg)
   DreamSubtitleParserFactory.kt # SAMI/MicroDVD/MPL2/SubViewer parsers + default delegate
@@ -3532,6 +3606,8 @@ test/
   audio_track_store_test.dart   # per-video+engine last audio pick
   tone_map_store_test.dart      # dreamplayer.toneMapMode store
   settings_tone_map_platform_test.dart # HDR tone-map tile hidden on iOS / shown on Android
+  hw_sdr_tonemap_store_test.dart # hardware SDR tone-mapping pref store (issue #55)
+  settings_hw_sdr_tonemap_test.dart  # hardware SDR tone-map tile: Android-only, visible in Player
   resume_store_test.dart        # resume position store
   continue_watching_test.dart   # continue-watching list
   subtitle_style_test.dart      # subtitle appearance store
@@ -3562,6 +3638,7 @@ test/
   episode_row_series_test.dart    # the REAL season-row title/subtitle widgets at phone widths
   episode_row_responsive_test.dart # size follows the ROW width; rotation, font scale, no overflow
   episode_row_real_test.dart      # real trailing chrome (2 IconButtons + chevron) declares its width
+  HwSdrToneMapTest.kt (android/app/src/test/...) # pure tone-map decision logic (issue #55)
 ```
 
 ## Workflow for the user (no Mac)

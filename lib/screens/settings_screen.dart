@@ -16,6 +16,7 @@ import '../services/r18dev_adapter.dart';
 import '../services/badge_prefs.dart';
 import '../services/cache_cleaner.dart';
 import '../services/decoder_mode.dart';
+import '../services/hw_sdr_tonemap_store.dart';
 import '../services/default_engine_store.dart';
 import '../services/download_manager.dart';
 import '../services/entitlements.dart';
@@ -68,6 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _mpvNormalizeDownmix = false;
   bool _pipEnabled = true;
   bool _autoPlayNext = false;
+  bool _hwSdrToneMap = false;
   DecoderMode _decoderMode = DecoderMode.auto;
   DefaultEngine _defaultEngine = DefaultEngine.ask;
   ToneMapMode _toneMapMode = ToneMapMode.sdr;
@@ -123,6 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSwipeGestures();
     _loadPipEnabled();
     _loadAutoPlayNext();
+    _loadHwSdrToneMap();
     _loadDecoderMode();
     _loadDefaultEngine();
     unawaited(_loadOtherVideos());
@@ -898,6 +901,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {}
   }
 
+  /// Hardware SDR tone-mapping (issue #55): the decoder is asked to output
+  /// standard SDR so the system's display colour modes apply again.
+  Future<void> _loadHwSdrToneMap() async {
+    try {
+      final enabled = await HwSdrToneMapStore.load();
+      if (mounted) setState(() => _hwSdrToneMap = enabled);
+    } catch (_) {}
+  }
+
   Future<void> _loadAudioFilters() async {
     try {
       final night = await NightModeStore.load();
@@ -1489,6 +1501,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         );
                       }
+                    },
+                  ),
+                if (defaultTargetPlatform == TargetPlatform.android &&
+                    _showMedia3Settings)
+                  SwitchListTile(
+                    secondary: const Icon(Icons.brightness_6),
+                    title: Text(
+                      AppLocalizations.of(context).settingsHwSdrToneMap,
+                    ),
+                    subtitle: Text(
+                      AppLocalizations.of(context).settingsHwSdrToneMapDesc,
+                    ),
+                    value: _hwSdrToneMap,
+                    onChanged: (value) async {
+                      await HwSdrToneMapStore.save(value);
+                      if (!mounted) return;
+                      setState(() => _hwSdrToneMap = value);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            AppLocalizations.of(context)
+                                .settingsTakesEffectNextVideo,
+                          ),
+                        ),
+                      );
                     },
                   ),
                 SwitchListTile(

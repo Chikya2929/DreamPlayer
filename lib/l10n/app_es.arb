@@ -781,6 +781,14 @@
   "@settingsDecoderReopen": {
     "description": "Subtitle under decoder picker"
   },
+  "settingsHwSdrToneMap": "Hardware SDR tone-mapping",
+  "@settingsHwSdrToneMap": {
+    "description": "Hardware SDR tone-mapping toggle label"
+  },
+  "settingsHwSdrToneMapDesc": "Ask the decoder to output standard SDR, so the system colour modes (Vivid/Natural, white balance) apply to the video again. The picture then leaves the HDR path — no real Dolby Vision or HDR10 on the panel. Needs Android 12+ and a device that supports it.",
+  "@settingsHwSdrToneMapDesc": {
+    "description": "Hardware SDR tone-mapping toggle subtitle"
+  },
   "settingsTmdbKey": "TMDB API key",
   "@settingsTmdbKey": {
     "description": "TMDB key input label"
