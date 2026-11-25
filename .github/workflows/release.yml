@@ -1,12 +1,5 @@
 name: Release
 
-# Publishing a release is just tagging: `git tag v0.1.0 && git push origin v0.1.0`.
-# This workflow builds the Android split-per-abi APKs and creates a GitHub
-# Release on the tag with them attached. No iOS artifact is built or attached
-# here - unsigned IPA sideloading is retired (DPLA 7.6/3.2(g): iOS apps may
-# only be distributed via the App Store, TestFlight, or Ad Hoc). Signed
-# TestFlight builds come from the separate ios.yml workflow.
-# (No AAB - Play Store publishing isn't set up yet.)
 on:
   push:
     tags:
@@ -32,11 +25,6 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          # PINNED, not latest stable: on 2026-11-13 unpinned stable moved to a
-          # Gradle minimum (9.3.1) above this project's wrapper (9.1.0) and every
-          # release build failed with "Gradle version lower than Flutter's
-          # minimum". Bump this pin together with android/gradle/wrapper when
-          # the wrapper is upgraded; must match the local dev toolchain.
           flutter-version: '3.47.2'
 
       - name: Fetch dependencies
@@ -47,13 +35,15 @@ jobs:
 
       - name: Install Android NDK (AC3-encoder ffmpeg build needs it)
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" >/dev/null
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973"
+          NDK_PATH="$SDK_ROOT/ndk/27.0.12077973"
+          test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          echo "NDK_DIR=$NDK_PATH" >> "$GITHUB_ENV"
 
       - name: Build minimal FFmpeg (AC3 encoder) into cpp/ac3enc/prebuilt
         run: ./tool/build_ffmpeg_ac3.sh
-        env:
-          NDK_DIR: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
       - name: Build universal release APK
         run: flutter build apk --release --dart-define=OPENSUBTITLES_API_KEY=${{ secrets.OPENSUBTITLES_API_KEY }} --dart-define=SIMKL_CLIENT_ID=${{ secrets.SIMKL_CLIENT_ID }}
